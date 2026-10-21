@@ -1,0 +1,4 @@
+packages:
+  - 'packages/vantio-agent-sdk'
+  - 'packages/vantio-cli'
+  - 'packages/vantio-optics-mcp'

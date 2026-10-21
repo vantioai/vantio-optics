@@ -1,0 +1,25 @@
+{
+  "name": "vantio-optics",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Vantio Optics — see what AI is doing on your Linux systems.",
+  "license": "MIT",
+  "homepage": "https://vantio.ai/optics",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vantioai/vantio-optics.git"
+  },
+  "bugs": {
+    "url": "https://github.com/vantioai/vantio-optics/issues"
+  },
+  "packageManager": "pnpm@11.13.0+sha512.88d94724d8f2e6c186744a5584c6e59ecac869ec7ba15e9cb4cd628e8dc7066820b2481d8ee3b51ea8da323a7378068aa58c556a3720d32b7c20a051d088363a",
+  "scripts": {
+    "lint": "pnpm --filter @vantio/cli run lint && pnpm --filter @vantio/optics-mcp run lint && pnpm --filter @vantio/agent-sdk run typecheck && pnpm --filter @vantio/agent-sdk run typecheck:test",
+    "test": "pnpm --filter @vantio/cli run test && pnpm --filter @vantio/optics-mcp run test && pnpm --filter @vantio/agent-sdk run test",
+    "build": "pnpm --filter @vantio/agent-sdk run build",
+    "test:python": "python3 -m unittest discover -s packages/vantio-agent-sdk-py/tests -t packages/vantio-agent-sdk-py -v"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

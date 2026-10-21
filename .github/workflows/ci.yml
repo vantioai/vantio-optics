@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  pull_request: {}
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-test-js:
+    name: Lint, typecheck, build, and test JavaScript
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install strace
+        run: sudo apt-get update && sudo apt-get install -y strace
+
+      - name: Lint @vantio/cli
+        run: pnpm --filter @vantio/cli run lint
+
+      - name: Lint @vantio/optics-mcp
+        run: pnpm --filter @vantio/optics-mcp run lint
+
+      - name: Typecheck @vantio/agent-sdk
+        run: pnpm --filter @vantio/agent-sdk run typecheck
+
+      - name: Typecheck @vantio/agent-sdk tests
+        run: pnpm --filter @vantio/agent-sdk run typecheck:test
+
+      - name: Test @vantio/cli
+        run: pnpm --filter @vantio/cli run test
+
+      - name: Test @vantio/optics-mcp
+        run: pnpm --filter @vantio/optics-mcp run test
+
+      - name: Test @vantio/agent-sdk
+        run: pnpm --filter @vantio/agent-sdk run test
+
+      - name: Build @vantio/agent-sdk
+        run: pnpm --filter @vantio/agent-sdk run build
+
+  test-python:
+    name: Test Python SDK (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install optional HTTP clients and the build frontend
+        run: python -m pip install --disable-pip-version-check requests httpx aiohttp urllib3 build
+
+      - name: Run tests
+        working-directory: packages/vantio-agent-sdk-py
+        run: python -m unittest discover -s tests -t . -v
