@@ -2,6 +2,14 @@
 
 This repository does not publish when a pull request merges. `.github/workflows/publish.yml` is `workflow_dispatch` only, and its publish jobs are disabled with `if: false`. Do not dispatch that workflow.
 
+## Freeze while open-core publishes
+
+Until the npm and PyPI trusted publishers point at this repository, `vantioai/vantio-open-core` is the publishing source. It publishes `@vantio/cli` 0.3.26 and `vantio-agent-sdk` 3.1.2 from sealed bytes. The `package.json` and `pyproject.toml` links here name this repository, so a pack from this tree does not match those sealed bytes. Do not publish those versions from here.
+
+During the freeze, package code in `packages/` and `extensions/vantio-optics` stays byte-identical to open-core `main`. Make a code change in both repositories in the same change window. The `Open-core drift` workflow (`scripts/check_open_core_drift.py`) fails on any other difference. READMEs, changelogs, tests, and repository links may differ.
+
+The freeze ends when the first release after 0.3.26 and 3.1.2 is cut from this repository, the trusted publishers are switched as described below, and the package directories are removed from open-core. Remove the drift workflow in that same change.
+
 Registry check on 2026-10-21:
 
 | Package | Registry | Latest | This tree |
