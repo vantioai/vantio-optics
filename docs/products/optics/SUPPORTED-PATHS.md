@@ -2,7 +2,7 @@
 
 A path is supported when a wrapped process records it. Anything else produces no Optics row. No row means not observed. It does not mean Optics blocked the call, allowed it, or made it safe.
 
-Phantom Engine is the product that enforces on enrolled hosts. This page does not describe Phantom Engine coverage.
+Phantom Engine is the product that enforces on enrolled Linux systems. This page does not describe Phantom Engine coverage.
 
 ## When a process is wrapped
 

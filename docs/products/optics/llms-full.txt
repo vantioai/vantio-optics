@@ -458,7 +458,7 @@ The package version is 0.1.2. The server constructor in this source tree reports
 
 - It does not start a daemon.
 - It does not create a SQLite database.
-- It does not enroll a host in Phantom Engine.
+- It does not enroll a Linux system in Phantom Engine.
 - It does not turn on telemetry for the CLI. CLI telemetry stays off until `VANTIO_TELEMETRY=1`.
 - It does not change the telemetry gate. Published CLI 0.3.24 and Python 3.1.1 stay off until `VANTIO_TELEMETRY=1`. See [TELEMETRY.md](TELEMETRY.md).
 
@@ -702,7 +702,7 @@ FILE: SUPPORTED-PATHS.md
 
 A path is supported when a wrapped process records it. Anything else produces no Optics row. No row means not observed. It does not mean Optics blocked the call, allowed it, or made it safe.
 
-Phantom Engine is the product that enforces on enrolled hosts. This page does not describe Phantom Engine coverage.
+Phantom Engine is the product that enforces on enrolled Linux systems. This page does not describe Phantom Engine coverage.
 
 ## When a process is wrapped
 
@@ -1336,7 +1336,7 @@ npm uninstall @vantio/agent-sdk
 npm uninstall -g @vantio/optics-mcp
 ```
 
-Uninstall does not unenroll a Phantom Engine host. This manual does not cover that product.
+Uninstall does not unenroll a Linux system from Phantom Engine. This manual does not cover that product.
 
 ## Accounts
 

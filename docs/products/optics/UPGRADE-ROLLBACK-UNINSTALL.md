@@ -92,7 +92,7 @@ npm uninstall @vantio/agent-sdk
 npm uninstall -g @vantio/optics-mcp
 ```
 
-Uninstall does not unenroll a Phantom Engine host. This manual does not cover that product.
+Uninstall does not unenroll a Linux system from Phantom Engine. This manual does not cover that product.
 
 ## Accounts
 

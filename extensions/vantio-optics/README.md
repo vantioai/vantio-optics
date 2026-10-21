@@ -1,6 +1,6 @@
 # Vantio Optics
 
-Observe-only **Sight Loop** commands for VS Code. Thin wrappers over the Vantio CLI — prove what Optics saw, discover local LLM hosts, and surface the residual upgrade path.
+Observe-only **Vantio Optics** commands for VS Code. Thin wrappers over the Vantio CLI — prove what Optics saw, discover local LLM hosts, and surface the residual upgrade path.
 
 **Blind by design:** this extension does not block, redact, or enforce policy.
 

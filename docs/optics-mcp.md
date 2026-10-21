@@ -1,6 +1,6 @@
 # Vantio Optics MCP
 
-Part of **Vantio Optics** · **Sight Loop** (observe / explain via Model Context Protocol).
+Part of **Vantio Optics** (observe and explain through the Model Context Protocol).
 
 Package: [`@vantio/optics-mcp`](../packages/vantio-optics-mcp/)
 
@@ -54,7 +54,7 @@ Local checkout — point `command` at `node` and `args` at
 |------|---------|
 | `optics_list_runs` | List `~/.vantio/runs` |
 | `optics_get_run` | One run (metadata only) |
-| `optics_prove` | Markdown Sight Loop proof |
+| `optics_prove` | Markdown Optics proof |
 | `optics_discover_local` | Hosts from local logs |
 | `optics_explain` | Optics privacy + fence |
 | `optics_upgrade_path` | Ladder → Phantom Engine → Enterprise |

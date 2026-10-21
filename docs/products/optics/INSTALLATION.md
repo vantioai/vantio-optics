@@ -83,7 +83,7 @@ The package version is 0.1.2. The server constructor in this source tree reports
 
 - It does not start a daemon.
 - It does not create a SQLite database.
-- It does not enroll a host in Phantom Engine.
+- It does not enroll a Linux system in Phantom Engine.
 - It does not turn on telemetry for the CLI. CLI telemetry stays off until `VANTIO_TELEMETRY=1`.
 - It does not change the telemetry gate. Published CLI 0.3.24 and Python 3.1.1 stay off until `VANTIO_TELEMETRY=1`. See [TELEMETRY.md](TELEMETRY.md).
 

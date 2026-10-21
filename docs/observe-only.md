@@ -39,7 +39,6 @@ If it can **change or block** behavior in production, it is **not** Free:
 | Spend / size caps | Phantom Engine (Enforce) |
 | Dry-run → hard enforce | Phantom Engine (Enforce) |
 | Policy-as-code publish / rollout | Phantom Engine (Enforce) |
-| Shadow AI Discover (fleet-wide) | Phantom Engine |
 | Blocking CI gates | Phantom Engine |
 
 **Fence:** if it can say **no** in production → **Vantio Phantom Engine**.
@@ -58,21 +57,21 @@ If you need protection on machines you own when a process skips the app wrap:
 
 | Out of scope for Optics alone | Product |
 |-------------------------------|---------|
-| Host TLS observe on enrolled Linux | **Vantio Phantom Engine** |
-| Rogue Reconciliation (host-seen, no app record) | Phantom Engine |
+| TLS observe on enrolled Linux systems | **Vantio Phantom Engine** |
+| Rogue Reconciliation (seen on the Linux system, no app record) | Phantom Engine |
 | Fork inheritance on enrolled Linux systems | Phantom Engine |
 | CIDR / enrolled-cgroup egress policy | Phantom Engine |
 | Append-oriented audit ledger (Enterprise) | Vantio Enterprise |
 
 **Fence:** Phantom Engine protects Linux systems you enroll — Observe, Enforce, and Control together, one purchase. It does not claim coverage for AI that never runs on that system.
 
-Enterprise workflow: **Rogue Reconciliation** — correlate app + host evidence when they diverge.
+Enterprise workflow: **Rogue Reconciliation** — correlate app and Linux system evidence when they diverge.
 
 ---
 
 ## Honest gap (by design)
 
-Optics intercepts via Node `fetch`, `undici.fetch`, `undici.request`, `undici.stream` / `pipeline` / `dispatch` / `connect` / `upgrade`, and `http`/`https` (`vantio run`) or Python `shield()` (urllib; requests/httpx/aiohttp when installed). That covers most real agents — and **can be skipped**:
+Optics intercepts via Node `fetch`, `undici.fetch`, `undici.request`, `undici.stream` / `pipeline` / `dispatch` / `connect` / `upgrade`, and `http`/`https` (`vantio run`) or Python `shield()` (urllib; requests/httpx/aiohttp when installed). Those paths **can be skipped**:
 
 - Native sockets / curl
 - Subprocesses not wrapped with `vantio run` / `@shield`
@@ -105,6 +104,6 @@ vantio discover --local
 
 ## See also
 
-- [Sight Loop](./sight-loop.md) — the Optics workflow (wrap → capture → inspect)
-- [Getting started](./getting-started-tier01.md)
-- [Proof artifacts](./prove.md)
+- [Optics manual](./products/optics/README.md)
+- [Quickstart](./products/optics/QUICKSTART.md)
+- [Supported paths](./products/optics/SUPPORTED-PATHS.md)
