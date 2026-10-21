@@ -1,0 +1,59 @@
+{
+  "name": "@vantio/agent-sdk",
+  "version": "0.2.4",
+  "description": "Vantio Optics Node SDK — shield() for Sight Loop observe. Metadata only; no prompts. Upgrade path to Phantom Engine and Enterprise.",
+  "license": "MIT",
+  "author": "Vantio AI, Inc.",
+  "homepage": "https://vantio.ai/optics",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vantioai/vantio-optics.git",
+    "directory": "packages/vantio-agent-sdk"
+  },
+  "bugs": { "url": "https://github.com/vantioai/vantio-optics/issues" },
+  "keywords": [
+    "vantio",
+    "vantio-optics",
+    "optics",
+    "sight-loop",
+    "ai",
+    "agent",
+    "sdk",
+    "observability",
+    "governance",
+    "tracing",
+    "langchain",
+    "openai"
+  ],
+  "type": "module",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/types/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/types/index.d.ts",
+        "default": "./dist/cjs/index.js"
+      }
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.esm.json && tsc -p tsconfig.cjs.json && tsc -p tsconfig.types.json && node scripts/postbuild.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:test": "tsc -p tsconfig.test.json",
+    "dev": "tsc -p tsconfig.esm.json --watch",
+    "test": "node --experimental-strip-types --test test/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

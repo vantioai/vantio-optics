@@ -1,0 +1,121 @@
+name: Publish
+
+# Manual only. Pull requests and pushes do not run this file.
+# Publish jobs are disabled with `if: false` and are not dispatched by this change.
+# See docs/publishing.md before anyone removes those guards.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publishing-disabled:
+    name: Publishing is disabled
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse to publish
+        run: |
+          echo "Publishing from vantioai/vantio-optics is disabled."
+          echo "Trusted publishers still have to point at this repository and publish.yml."
+          echo "Read docs/publishing.md. This job does not upload to npm or PyPI."
+          exit 1
+
+  publish-npm:
+    name: Publish npm packages
+    if: false
+    needs: publishing-disabled
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Require npm trusted publishing
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const [major, minor] = process.versions.node.split(".").map(Number);
+          if (major < 22 || (major === 22 && minor < 14)) {
+            console.error(`Node.js ${process.versions.node} is below 22.14`);
+            process.exit(1);
+          }
+          NODE
+          npm install -g npm@11
+          node <<'NODE'
+          const { execSync } = require("child_process");
+          const version = execSync("npm --version", { encoding: "utf8" }).trim();
+          const [major, minor] = version.split(".").map(Number);
+          if (major < 11 || (major === 11 && minor < 5)) {
+            console.error(`npm ${version} is below 11.5.1`);
+            process.exit(1);
+          }
+          NODE
+          test -z "${NPM_TOKEN:-}"
+          test -z "${NODE_AUTH_TOKEN:-}"
+          test "${GITHUB_REPOSITORY}" = "vantioai/vantio-optics"
+          test "${GITHUB_EVENT_NAME}" = "workflow_dispatch"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build @vantio/agent-sdk
+        run: pnpm --filter @vantio/agent-sdk run build
+
+      - name: Publish allowlisted packages
+        run: |
+          set -euo pipefail
+          npm publish --access public ./packages/vantio-cli
+          npm publish --access public ./packages/vantio-agent-sdk
+          npm publish --access public ./packages/vantio-optics-mcp
+
+  publish-pypi:
+    name: Publish vantio-agent-sdk to PyPI
+    if: false
+    needs: publishing-disabled
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Require the PyPI trusted-publisher identity
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
+          test "$GITHUB_REPOSITORY" = "vantioai/vantio-optics"
+          test "$GITHUB_WORKFLOW_REF" = "vantioai/vantio-optics/.github/workflows/publish.yml@refs/heads/main"
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --disable-pip-version-check build
+          python -m build --outdir dist packages/vantio-agent-sdk-py
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+        with:
+          packages-dir: dist
+          verbose: false
+          print-hash: false
+          skip-existing: false

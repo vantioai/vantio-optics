@@ -1,0 +1,2198 @@
+"""
+Sight Loop observe for Python HTTP clients while shield() is active.
+
+Records host, path, status, and size — never prompts or completions.
+HTTP 200–399 is stored ok=true. HTTP 400–599 is stored ok=false and is an
+application outcome, not network_error. Each record separates opticsStatus
+(Optics status) from applicationStatus (machine token). The customer lines are
+Optics status, observed outcome, and provider response.
+In-scope LLM hosts (plus VANTIO_EXTRA_LLM_HOSTS), including regional Bedrock
+and Vertex patterns and local Ollama on port 11434.
+
+Wraps urllib.request.urlopen and OpenerDirector.open always. If requests,
+httpx, aiohttp, urllib3, or pycurl are installed, wraps those too. Also wraps
+socket.connect / connect_ex / create_connection / ssl.SSLSocket.connect and
+http.client request/putrequest to in-scope hosts (observe only; TLS
+payloads are not read). Also wraps subprocess / os.system / asyncio curl, wget,
+httpie, and aria2c spawns to in-scope hosts (observe only; file-body
+and curl -F size from stat; stdin size when stdin is a file; wget -i URL lines;
+file contents and stdin pipes are not read; argv is not rewritten). Optics does
+not block, delay, or rewrite. Browsers stay outside this wrap.
+"""
+from __future__ import annotations
+
+import asyncio
+import http.client
+import json
+import os
+import shlex
+import socket
+import ssl
+import stat
+import subprocess
+import sys
+import threading
+import time
+import urllib.error
+import urllib.request
+from contextlib import contextmanager
+from contextvars import ContextVar
+from datetime import datetime, timezone
+from typing import Any, Iterator, Optional
+from urllib.parse import urlparse
+
+from ._outcome import (
+    SCHEMA_STATUS,
+    apply_customer_outcome,
+    classify_exception,
+    socket_failure,
+    summarize_customer_fields,
+)
+
+try:
+    import requests as _requests
+except ImportError:
+    _requests = None  # type: ignore[assignment]
+
+try:
+    import httpx as _httpx
+except ImportError:
+    _httpx = None  # type: ignore[assignment]
+
+try:
+    import aiohttp as _aiohttp
+except ImportError:
+    _aiohttp = None  # type: ignore[assignment]
+
+try:
+    import urllib3 as _urllib3
+except ImportError:
+    _urllib3 = None  # type: ignore[assignment]
+
+try:
+    import pycurl as _pycurl
+except ImportError:
+    _pycurl = None  # type: ignore[assignment]
+
+# Keep in lockstep with vantio-cli/bin/llm-hosts.cjs
+_LLM_HOSTS = {
+    "api.openai.com",
+    "api.anthropic.com",
+    "generativelanguage.googleapis.com",
+    "api.cohere.ai",
+    "api.cohere.com",
+    "api.mistral.ai",
+    "api.groq.com",
+    "api.together.xyz",
+    "api.perplexity.ai",
+    "inference.ai.azure.com",
+    "openai.azure.com",
+    "api.x.ai",
+    "api.deepseek.com",
+    "api.fireworks.ai",
+    "openrouter.ai",
+    "api.cerebras.ai",
+    "api.voyageai.com",
+    "api.sambanova.ai",
+    "api.deepinfra.com",
+    "router.huggingface.co",
+    "api-inference.huggingface.co",
+    "api.replicate.com",
+    "ollama.com",
+    "integrate.api.nvidia.com",
+}
+
+_lock = threading.Lock()
+_depth = 0
+_orig_urlopen = urllib.request.urlopen
+_orig_opener_open: Any = None
+_orig_requests_send: Any = None
+_orig_httpx_sync_send: Any = None
+_orig_httpx_async_send: Any = None
+_orig_aiohttp_request: Any = None
+_orig_socket_connect: Any = None
+_orig_socket_connect_ex: Any = None
+_orig_create_connection: Any = None
+_orig_ssl_connect: Any = None
+_orig_http_request: Any = None
+_orig_http_getresponse: Any = None
+_orig_http_putrequest: Any = None
+_orig_urllib3_request: Any = None
+_orig_pycurl_curl: Any = None
+_orig_popen: Any = None
+_orig_os_system: Any = None
+_orig_asyncio_exec: Any = None
+_orig_asyncio_shell: Any = None
+_calls: list[dict[str, Any]] = []
+_started_ms = 0.0
+_trace_id = ""
+# Host lists stay empty. Optics does not load a cloud policy.
+_policy: dict[str, Any] = {
+    "allowed_hosts": [],
+    "blocked_hosts": [],
+}
+_spent_usd = 0.0
+# Same estimator as interceptor.cjs (rough token→USD; not a billing meter).
+_USD_PER_BYTE = (5 / 1_000_000) / 4
+
+# HTTP orig calls mark this so inner socket.connect is not ingested twice.
+_http_owns_connect: ContextVar[bool] = ContextVar("vantio_http_owns_connect", default=False)
+_http_owns_tls = threading.local()
+
+
+@contextmanager
+def _http_handled() -> Iterator[None]:
+    token = _http_owns_connect.set(True)
+    _http_owns_tls.depth = getattr(_http_owns_tls, "depth", 0) + 1
+    try:
+        yield
+    finally:
+        _http_owns_tls.depth = getattr(_http_owns_tls, "depth", 1) - 1
+        _http_owns_connect.reset(token)
+
+
+def _http_owns() -> bool:
+    return _http_owns_connect.get() or getattr(_http_owns_tls, "depth", 0) > 0
+
+
+def _http_orig(fn: Any, *args: Any, **kwargs: Any) -> Any:
+    with _http_handled():
+        return fn(*args, **kwargs)
+
+
+async def _http_orig_async(fn: Any, *args: Any, **kwargs: Any) -> Any:
+    with _http_handled():
+        return await fn(*args, **kwargs)
+
+
+def _extra_hosts() -> set[str]:
+    raw = os.environ.get("VANTIO_EXTRA_LLM_HOSTS", "")
+    return {h.strip().lower() for h in raw.split(",") if h.strip()}
+
+
+def _host_listed(hostname: str, items: set[str]) -> bool:
+    h = (hostname or "").lower()
+    if not h:
+        return False
+    if h in items:
+        return True
+    for item in items:
+        if item and "." in item and h.endswith("." + item):
+            return True
+    return False
+
+
+def _host_matches_regional(hostname: str) -> bool:
+    h = (hostname or "").lower()
+    if not h:
+        return False
+    if h.startswith("bedrock-runtime") and h.endswith(".amazonaws.com"):
+        # bedrock-runtime.{region}.amazonaws.com / bedrock-runtime-fips.{region}...
+        labels = h.split(".")
+        if len(labels) == 4 and labels[0] in ("bedrock-runtime", "bedrock-runtime-fips"):
+            return True
+    if h.startswith("bedrock-mantle.") and h.endswith(".api.aws"):
+        labels = h.split(".")
+        if len(labels) == 4 and labels[0] == "bedrock-mantle":
+            return True
+    if h.startswith("bedrock-agent-runtime") and h.endswith(".amazonaws.com"):
+        labels = h.split(".")
+        if len(labels) == 4 and labels[0] in (
+            "bedrock-agent-runtime",
+            "bedrock-agent-runtime-fips",
+        ):
+            return True
+    if h == "aiplatform.googleapis.com":
+        return True
+    if h.endswith("-aiplatform.googleapis.com") and "." in h:
+        return True
+    if h in ("aiplatform.us.rep.googleapis.com", "aiplatform.eu.rep.googleapis.com"):
+        return True
+    if h == "endpoints.huggingface.cloud" or h.endswith(".endpoints.huggingface.cloud"):
+        return True
+    return False
+
+
+def _is_ollama_local(hostname: str, port: Optional[str]) -> bool:
+    h = (hostname or "").lower()
+    p = "" if port is None else str(port)
+    if p != "11434":
+        return False
+    return h in ("localhost", "127.0.0.1", "::1", "[::1]")
+
+
+def _in_scope(hostname: str, port: Optional[str] = None) -> bool:
+    return (
+        _host_listed(hostname, _LLM_HOSTS | _extra_hosts())
+        or _host_matches_regional(hostname)
+        or _is_ollama_local(hostname, port)
+        or _host_listed(hostname, set(_policy.get("blocked_hosts") or []))
+        or _host_listed(hostname, set(_policy.get("allowed_hosts") or []))
+    )
+
+
+def _reset_policy() -> None:
+    global _spent_usd
+    _policy.update({
+        "allowed_hosts": [],
+        "blocked_hosts": [],
+    })
+    _spent_usd = 0.0
+
+
+def _is_control_plane(hostname: str, path: str) -> bool:
+    try:
+        ingest = os.environ.get("VANTIO_INGEST_URL", "https://vantio.ai")
+        parsed = urlparse(ingest)
+        host = (parsed.hostname or "").lower()
+        if not host or (hostname or "").lower() != host:
+            return False
+        return str(path or "").startswith("/api/v1/")
+    except Exception:
+        return False
+
+
+def _is_control_plane_dest(hostname: str, port: Optional[str]) -> bool:
+    """True when this TCP dest is the Gate control plane (any path)."""
+    try:
+        ingest = urlparse(os.environ.get("VANTIO_INGEST_URL") or "https://vantio.ai")
+        host = (ingest.hostname or "").lower()
+        if not host or (hostname or "").lower() != host:
+            return False
+        ingest_port = ingest.port or (443 if ingest.scheme == "https" else 80)
+        if port is None or port == "":
+            return True
+        return str(port) == str(ingest_port)
+    except Exception:
+        return False
+
+
+def _load_policy() -> None:
+    """Optics does not fetch policy and does not send VANTIO_API_KEY for enforcement."""
+    _reset_policy()
+    key = os.environ.get("VANTIO_API_KEY") or ""
+    if key.strip():
+        sys.stderr.write(
+            "[ ∅ VANTIO ] VANTIO_API_KEY is set. Enforcement is provided by Phantom Engine. "
+            "Optics is observational and this call is not blocked.\n"
+        )
+    return
+
+
+def _body_to_text(body: Any) -> tuple[Optional[str], Optional[bytes], int]:
+    """Return (text, bytes, length). Never raises."""
+    if body is None:
+        return None, None, 0
+    if isinstance(body, bytes):
+        try:
+            return body.decode("utf-8"), body, len(body)
+        except Exception:
+            return None, body, len(body)
+    if isinstance(body, bytearray):
+        b = bytes(body)
+        try:
+            return b.decode("utf-8"), b, len(b)
+        except Exception:
+            return None, b, len(b)
+    if isinstance(body, str):
+        encoded = body.encode("utf-8")
+        return body, encoded, len(encoded)
+    return None, None, 0
+
+
+def _aiohttp_request_body(kwargs: dict[str, Any]) -> Any:
+    if kwargs.get("data") is not None:
+        return kwargs["data"]
+    if kwargs.get("json") is not None:
+        try:
+            return json.dumps(kwargs["json"])
+        except Exception:
+            return None
+    return None
+
+def _decide(hostname: str, port: Optional[str], path: str, body_len: int) -> str:
+    """pass | observe. Optics does not block, cap spend, or apply a host list."""
+    if not hostname or _is_control_plane(hostname, path) or not _in_scope(hostname, port):
+        return "pass"
+    return "observe"
+
+
+def _host_port_from_url(url: Any) -> tuple[str, Optional[str], str]:
+    """Return (hostname, port, path). Never raises."""
+    try:
+        if hasattr(url, "host") and hasattr(url, "port") and not isinstance(url, str):
+            host = str(getattr(url, "host", "") or "")
+            port = getattr(url, "port", None)
+            path = str(getattr(url, "path", "/") or "/")
+            return host, (str(port) if port is not None else None), path
+        raw = url
+        if hasattr(url, "full_url"):
+            raw = url.full_url
+        parsed = urlparse(str(raw))
+        host = parsed.hostname or ""
+        port = parsed.port
+        path = parsed.path or "/"
+        return host, (str(port) if port is not None else None), path
+    except Exception:
+        return "", None, "/"
+
+
+def _append(rec: dict[str, Any]) -> None:
+    with _lock:
+        _calls.append(rec)
+    _note_live(rec)
+
+
+def _clock_local(moment: datetime) -> str:
+    return moment.astimezone().strftime("%H:%M:%S")
+
+
+def _clock_from_ts(value: object) -> str:
+    if isinstance(value, str) and value.strip():
+        text = value.strip().replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            parsed = None
+        if parsed is not None:
+            return _clock_local(parsed)
+    return _clock_local(datetime.now().astimezone())
+
+
+def _allowlist_suppresses(destination: str, allowlist: dict[str, Any]) -> bool:
+    host = destination.lower()
+    for raw in allowlist.get("destinations") or []:
+        pattern = raw if isinstance(raw, str) else ""
+        if isinstance(raw, dict):
+            pattern = str(raw.get("destination") or "")
+            alert = raw.get("alert")
+        else:
+            alert = None
+        pattern = pattern.lower()
+        matched = False
+        if pattern.startswith("*."):
+            suffix = pattern[1:]
+            label = host[: -len(suffix)] if host.endswith(suffix) else ""
+            matched = bool(label) and "." not in label
+        elif pattern == host:
+            matched = True
+        if not matched:
+            continue
+        if isinstance(alert, bool):
+            return not alert
+        return allowlist.get("alert_on_allowlist") is not True
+    return False
+
+
+def _note_live(rec: dict[str, Any]) -> None:
+    """Record the destination while the call is happening. Does not stop the call."""
+    try:
+        host = str(rec.get("hostname") or "").strip().lower()
+        if not host or "/" in host or " " in host:
+            return
+        home = os.environ.get("VANTIO_HOME") or os.path.join(os.path.expanduser("~"), ".vantio")
+        os.makedirs(home, mode=0o700, exist_ok=True)
+        lock = os.path.join(home, "seen.lock")
+        started = time.time()
+        while True:
+            try:
+                os.mkdir(lock, 0o700)
+                break
+            except FileExistsError:
+                if time.time() - started > 2:
+                    raise TimeoutError("seen destination file is busy")
+        try:
+            allow_path = os.path.join(home, "allowlist.json")
+            allowlist: dict[str, Any] = {}
+            if os.path.isfile(allow_path):
+                with open(allow_path, encoding="utf-8") as handle:
+                    parsed = json.load(handle)
+                if isinstance(parsed, dict):
+                    allowlist = parsed
+            seen_path = os.path.join(home, "seen-destinations.json")
+            pairs: list[dict[str, Any]] = []
+            if os.path.isfile(seen_path):
+                with open(seen_path, encoding="utf-8") as handle:
+                    parsed = json.load(handle)
+                if isinstance(parsed, dict) and isinstance(parsed.get("pairs"), list):
+                    pairs = list(parsed["pairs"])
+            program = _program_label()
+            key = ("connection", program, host)
+            known = {
+                (str(pair.get("kind") or "connection"), str(pair.get("program") or ""), str(pair.get("destination") or ""))
+                for pair in pairs
+                if isinstance(pair, dict)
+            }
+            fresh = key not in known and not _allowlist_suppresses(host, allowlist)
+            if key not in known:
+                pairs.append({
+                    "kind": "connection",
+                    "program": program,
+                    "destination": host,
+                    "display": host,
+                    "first_ts": rec.get("ts"),
+                    "trace_id": _trace_id or None,
+                    "alerted": fresh,
+                })
+                temporary = seen_path + ".tmp"
+                with open(temporary, "w", encoding="utf-8") as handle:
+                    json.dump({"schema": "vantio.optics.seen_destinations.v1", "pairs": pairs}, handle)
+                    handle.write("\n")
+                os.chmod(temporary, 0o600)
+                os.replace(temporary, seen_path)
+            event = {
+                "schema": "vantio.optics.live.v1",
+                "kind": "new_destination" if fresh else "observation",
+                "flag": "new_destination" if fresh else None,
+                "flag_label": "New destination" if fresh else None,
+                "clock": _clock_from_ts(rec.get("ts")),
+                "time": rec.get("ts"),
+                "program": program,
+                "destination": host,
+                "trace_id": _trace_id or None,
+                "method": rec.get("method"),
+                "path": str(rec.get("path") or "").split("?", 1)[0] or None,
+                "bytes": rec.get("bytes") if isinstance(rec.get("bytes"), int) else rec.get("bytes_observed"),
+            }
+            journal = os.path.join(home, "live.jsonl")
+            with open(journal, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps(event) + "\n")
+            try:
+                os.chmod(journal, 0o600)
+            except OSError:
+                pass
+            if fresh:
+                sys.stderr.write(
+                    "New destination\n"
+                    f"  First connection: {event['clock']}\n"
+                    f"  Destination: {host}\n"
+                    f"  Program: {program}\n\n"
+                )
+        finally:
+            try:
+                os.rmdir(lock)
+            except OSError:
+                pass
+    except Exception as exc:
+        sys.stderr.write(f"[ ∅ VANTIO ] could not record the live destination: {exc}\n")
+
+
+# Machine-token gloss. Customer observed-outcome lines are chosen in _outcome
+# from the HTTP status or transport kind, not from APPLICATION_ERROR's gloss.
+_STATUS_HUMAN = {
+    "OBSERVED": "Observed",
+    "NOT_OBSERVED": "Not observed",
+    "UNSUPPORTED": "Unsupported",
+    "UNAVAILABLE": "Unavailable",
+    "APPLICATION_ERROR": "Application error",
+    "OPTICS_ERROR": "Optics error",
+    "PARTIAL": "Partial",
+    "SUCCESS": "Successful",
+}
+
+
+def _human_status(token: str) -> str:
+    return _STATUS_HUMAN.get(token, "Unavailable")
+
+
+def _normalize_http_status(status: Any) -> Optional[int]:
+    """Integer HTTP status, or None when the value is not an integer code."""
+    if isinstance(status, bool) or status is None or status == "":
+        return None
+    if isinstance(status, int):
+        return status
+    if isinstance(status, float):
+        return int(status) if status.is_integer() else None
+    try:
+        return int(str(status).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _application_status(status: Any) -> str:
+    """Application outcome from the raw HTTP status. 200–399 success, 400–599 error."""
+    n = _normalize_http_status(status)
+    if n is None:
+        return "UNAVAILABLE"
+    if 200 <= n < 400:
+        return "SUCCESS"
+    if 400 <= n <= 599:
+        return "APPLICATION_ERROR"
+    return "UNAVAILABLE"
+
+
+def _ok_for_http_status(status: Any) -> bool:
+    """True only for HTTP 200–399. 4xx and 5xx are not ok."""
+    n = _normalize_http_status(status)
+    return n is not None and 200 <= n < 400
+
+
+def _http_status_from_exception(exc: BaseException) -> Optional[int]:
+    """HTTP status carried by an HTTP-error exception, else None.
+
+    urllib raises HTTPError for 4xx/5xx. requests, httpx, and aiohttp raise
+    status errors only when the caller asks. A timeout or refused connection
+    has no HTTP status.
+    """
+    if isinstance(exc, urllib.error.HTTPError):
+        return _normalize_http_status(getattr(exc, "code", None))
+    response = getattr(exc, "response", None)
+    if response is not None:
+        for attr in ("status_code", "status", "code"):
+            n = _normalize_http_status(getattr(response, attr, None))
+            if n is not None and 100 <= n <= 599:
+                return n
+    if type(exc).__name__ == "ClientResponseError":
+        n = _normalize_http_status(getattr(exc, "status", None))
+        if n is not None and 100 <= n <= 599:
+            return n
+    return None
+
+
+def _duration_ms(t0: float) -> int:
+    return max(0, int((time.time() - t0) * 1000))
+
+
+def _record_http_response(
+    hostname: str,
+    action: str,
+    mediation: str,
+    status: Any,
+    t0: float,
+    **extra: Any,
+) -> None:
+    _record(
+        hostname,
+        action,
+        mediation,
+        status=_normalize_http_status(status),
+        ok=_ok_for_http_status(status),
+        duration_ms=_duration_ms(t0),
+        **extra,
+    )
+
+
+def _record_http_exception(
+    hostname: str,
+    mediation: str,
+    exc: BaseException,
+    t0: float,
+    *,
+    record_send: bool,
+    action: str,
+    **extra: Any,
+) -> None:
+    """Store an HTTP error as an application outcome. Network failures stay network_error.
+
+    A final HTTP status on this exception wins over a transport error nested
+    in its chain. The walk does not invent a status from a handled retry.
+    """
+    status = _http_status_from_exception(exc)
+    if status is not None:
+        if record_send:
+            _record_http_response(
+                hostname,
+                action,
+                mediation,
+                status,
+                t0,
+                **extra,
+            )
+        return
+    kind, phrase = classify_exception(exc)
+    fields: dict[str, Any] = {
+        **extra,
+        "ok": False,
+        "duration_ms": _duration_ms(t0),
+        "error_class": type(exc).__name__,
+        "failure_kind": kind,
+        "failure_response": phrase,
+    }
+    if kind != "wrapped":
+        fields["error"] = "network_error"
+    _record(hostname, "OBSERVED", mediation, **fields)
+
+
+def _rollup_status(calls: list[dict[str, Any]]) -> tuple[str, str]:
+    if not calls:
+        return "NOT_OBSERVED", "NOT_OBSERVED"
+    apps = {_application_status(call.get("status")) for call in calls}
+    application = next(iter(apps)) if len(apps) == 1 else "PARTIAL"
+    return "SUCCESS", application
+
+
+def _record(
+    hostname: str,
+    action: str,
+    mediation: str,
+    **extra: Any,
+) -> dict[str, Any]:
+    rec = {
+        "hostname": hostname,
+        "provider": extra.pop("provider", "other"),
+        "action": action,
+        "mediation": mediation,
+        "ts": datetime.now(timezone.utc).isoformat(),
+        **extra,
+    }
+    optics = "SUCCESS"
+    application = _application_status(rec.get("status"))
+    rec["opticsStatus"] = optics
+    rec["applicationStatus"] = application
+    rec["opticsLabel"] = _human_status(optics)
+    apply_customer_outcome(rec)
+    _append(rec)
+    return rec
+
+
+def _dispatch_gate(
+    hostname: str,
+    port: Optional[str],
+    path: str,
+    body: Any,
+    _mediation: str,
+) -> tuple[str, Any, list[str], bool]:
+    """Return (kind, body, redactions, record_send).
+
+    kind is pass or send. Optics does not block, dry-run, or rewrite the body.
+    record_send is true when the caller should store an observation.
+    """
+    _, _, length = _body_to_text(body)
+    if _decide(hostname, port, path, length) == "pass":
+        return "pass", body, [], False
+    return "send", body, [], True
+
+
+def _account_response_bytes(headers: Any) -> None:
+    global _spent_usd
+    if not headers:
+        return
+    try:
+        cl = headers.get("content-length") if hasattr(headers, "get") else None
+        if cl:
+            _spent_usd += int(cl) * _USD_PER_BYTE
+    except (TypeError, ValueError, AttributeError):
+        return
+
+
+def _observe_urlopen(url, data=None, timeout=None, *args, **kwargs):
+    hostname, port, path = _host_port_from_url(url)
+    try:
+        raw_url = url
+        if hasattr(url, "full_url"):
+            raw_url = url.full_url
+        scheme = "https" if str(raw_url).startswith("https") else "http"
+    except Exception:
+        scheme = "https"
+
+    body = data if data is not None else getattr(url, "data", None)
+    kind, payload, redactions, record_send = _dispatch_gate(
+        hostname, port, path, body, "python_urllib"
+    )
+    if kind == "pass":
+        return _http_orig(_orig_urlopen, url, data, timeout, *args, **kwargs)
+
+    t0 = time.time()
+    try:
+        resp = _http_orig(_orig_urlopen, url, data, timeout, *args, **kwargs)
+        _account_response_bytes(getattr(resp, "headers", None))
+        if record_send:
+            action = "OBSERVED"
+            _record_http_response(
+                hostname,
+                action,
+                "python_urllib",
+                getattr(resp, "status", None) or getattr(resp, "code", None),
+                t0,
+                method="POST" if data is not None else "GET",
+                path=path,
+                scheme=scheme,
+            )
+        return resp
+    except Exception as exc:
+        _record_http_exception(
+            hostname,
+            "python_urllib",
+            exc,
+            t0,
+            record_send=record_send,
+            action="OBSERVED",
+            method="POST" if data is not None else "GET",
+            path=path,
+            scheme=scheme,
+        )
+        raise
+
+
+def _observe_opener_open(self, fullurl, data=None, timeout=socket._GLOBAL_DEFAULT_TIMEOUT):  # type: ignore[no-untyped-def]
+    if _http_owns():
+        return _orig_opener_open(self, fullurl, data, timeout)
+    hostname, port, path = _host_port_from_url(fullurl)
+    try:
+        raw_url = fullurl
+        if hasattr(fullurl, "full_url"):
+            raw_url = fullurl.full_url
+        scheme = "https" if str(raw_url).startswith("https") else "http"
+    except Exception:
+        scheme = "https"
+    body = data if data is not None else getattr(fullurl, "data", None)
+    kind, payload, redactions, record_send = _dispatch_gate(
+        hostname, port, path, body, "python_urllib"
+    )
+    if kind == "pass":
+        return _http_orig(_orig_opener_open, self, fullurl, data, timeout)
+    t0 = time.time()
+    try:
+        resp = _http_orig(_orig_opener_open, self, fullurl, data, timeout)
+        _account_response_bytes(getattr(resp, "headers", None))
+        if record_send:
+            action = "OBSERVED"
+            _record_http_response(
+                hostname,
+                action,
+                "python_urllib",
+                getattr(resp, "status", None) or getattr(resp, "code", None),
+                t0,
+                method="POST" if (data is not None or body is not None) else "GET",
+                path=path,
+                scheme=scheme,
+            )
+        return resp
+    except Exception as exc:
+        _record_http_exception(
+            hostname,
+            "python_urllib",
+            exc,
+            t0,
+            record_send=record_send,
+            action="OBSERVED",
+            method="POST" if (data is not None or body is not None) else "GET",
+            path=path,
+            scheme=scheme,
+        )
+        raise
+
+
+def _install_opener() -> None:
+    global _orig_opener_open
+    if _orig_opener_open is not None:
+        return
+    _orig_opener_open = urllib.request.OpenerDirector.open
+    urllib.request.OpenerDirector.open = _observe_opener_open  # type: ignore[assignment]
+
+
+def _uninstall_opener() -> None:
+    global _orig_opener_open
+    try:
+        if _orig_opener_open is not None:
+            urllib.request.OpenerDirector.open = _orig_opener_open
+    except Exception:
+        pass
+    _orig_opener_open = None
+
+
+def _install_requests() -> None:
+    global _orig_requests_send
+    if _requests is None:
+        return
+    _orig_requests_send = _requests.sessions.Session.send
+
+    def _observe_send(self, request, **kwargs):  # type: ignore[no-untyped-def]
+        hostname, port, path = _host_port_from_url(getattr(request, "url", ""))
+        body = getattr(request, "body", None)
+        kind, payload, redactions, record_send = _dispatch_gate(
+            hostname, port, path, body, "python_requests"
+        )
+        if kind == "pass":
+            return _http_orig(_orig_requests_send, self, request, **kwargs)
+        t0 = time.time()
+        method = str(getattr(request, "method", "GET") or "GET").upper()
+        scheme = "https" if str(getattr(request, "url", "")).startswith("https") else "http"
+        try:
+            resp = _http_orig(_orig_requests_send, self, request, **kwargs)
+            _account_response_bytes(getattr(resp, "headers", None))
+            if record_send:
+                action = "OBSERVED"
+                _record_http_response(
+                    hostname,
+                    action,
+                    "python_requests",
+                    getattr(resp, "status_code", None),
+                    t0,
+                    method=method,
+                    path=path,
+                    scheme=scheme,
+                )
+            return resp
+        except Exception as exc:
+            _record_http_exception(
+                hostname,
+                "python_requests",
+                exc,
+                t0,
+                record_send=record_send,
+                action="OBSERVED",
+                method=method,
+                path=path,
+                scheme=scheme,
+            )
+            raise
+
+    _requests.sessions.Session.send = _observe_send  # type: ignore[assignment]
+
+
+def _uninstall_requests() -> None:
+    global _orig_requests_send
+    if _orig_requests_send is None:
+        return
+    try:
+        if _requests is not None:
+            _requests.sessions.Session.send = _orig_requests_send
+    except Exception:
+        pass
+    _orig_requests_send = None
+
+
+def _install_httpx() -> None:
+    global _orig_httpx_sync_send, _orig_httpx_async_send
+    if _httpx is None:
+        return
+    _orig_httpx_sync_send = _httpx.Client.send
+    _orig_httpx_async_send = _httpx.AsyncClient.send
+
+    def _observe_sync(self, request, **kwargs):  # type: ignore[no-untyped-def]
+        hostname, port, path = _host_port_from_url(getattr(request, "url", ""))
+        body = getattr(request, "content", None)
+        kind, payload, redactions, record_send = _dispatch_gate(
+            hostname, port, path, body, "python_httpx"
+        )
+        if kind == "pass":
+            return _http_orig(_orig_httpx_sync_send, self, request, **kwargs)
+        t0 = time.time()
+        method = str(getattr(request, "method", "GET") or "GET").upper()
+        scheme = "https" if str(request.url).startswith("https") else "http"
+        try:
+            resp = _http_orig(_orig_httpx_sync_send, self, request, **kwargs)
+            _account_response_bytes(getattr(resp, "headers", None))
+            if record_send:
+                action = "OBSERVED"
+                _record_http_response(
+                    hostname,
+                    action,
+                    "python_httpx",
+                    getattr(resp, "status_code", None),
+                    t0,
+                    method=method,
+                    path=path,
+                    scheme=scheme,
+                )
+            return resp
+        except Exception as exc:
+            _record_http_exception(
+                hostname,
+                "python_httpx",
+                exc,
+                t0,
+                record_send=record_send,
+                action="OBSERVED",
+                method=method,
+                path=path,
+                scheme=scheme,
+            )
+            raise
+
+    async def _observe_async(self, request, **kwargs):  # type: ignore[no-untyped-def]
+        hostname, port, path = _host_port_from_url(getattr(request, "url", ""))
+        body = getattr(request, "content", None)
+        kind, payload, redactions, record_send = _dispatch_gate(
+            hostname, port, path, body, "python_httpx"
+        )
+        if kind == "pass":
+            return await _http_orig_async(_orig_httpx_async_send, self, request, **kwargs)
+        t0 = time.time()
+        method = str(getattr(request, "method", "GET") or "GET").upper()
+        scheme = "https" if str(request.url).startswith("https") else "http"
+        try:
+            resp = await _http_orig_async(_orig_httpx_async_send, self, request, **kwargs)
+            _account_response_bytes(getattr(resp, "headers", None))
+            if record_send:
+                action = "OBSERVED"
+                _record_http_response(
+                    hostname,
+                    action,
+                    "python_httpx",
+                    getattr(resp, "status_code", None),
+                    t0,
+                    method=method,
+                    path=path,
+                    scheme=scheme,
+                )
+            return resp
+        except Exception as exc:
+            _record_http_exception(
+                hostname,
+                "python_httpx",
+                exc,
+                t0,
+                record_send=record_send,
+                action="OBSERVED",
+                method=method,
+                path=path,
+                scheme=scheme,
+            )
+            raise
+
+    _httpx.Client.send = _observe_sync  # type: ignore[assignment]
+    _httpx.AsyncClient.send = _observe_async  # type: ignore[assignment]
+
+
+def _uninstall_httpx() -> None:
+    global _orig_httpx_sync_send, _orig_httpx_async_send
+    if _orig_httpx_sync_send is None and _orig_httpx_async_send is None:
+        return
+    try:
+        if _httpx is not None:
+            if _orig_httpx_sync_send is not None:
+                _httpx.Client.send = _orig_httpx_sync_send
+            if _orig_httpx_async_send is not None:
+                _httpx.AsyncClient.send = _orig_httpx_async_send
+    except Exception:
+        pass
+    _orig_httpx_sync_send = None
+    _orig_httpx_async_send = None
+
+
+def _install_aiohttp() -> None:
+    global _orig_aiohttp_request
+    if _aiohttp is None:
+        return
+    _orig_aiohttp_request = _aiohttp.ClientSession._request
+
+    async def _observe_request(self, method, str_or_url, **kwargs):  # type: ignore[no-untyped-def]
+        hostname, port, path = _host_port_from_url(str_or_url)
+        body = _aiohttp_request_body(kwargs)
+        kind, payload, redactions, record_send = _dispatch_gate(
+            hostname, port, path, body, "python_aiohttp"
+        )
+        if kind == "pass":
+            return await _http_orig_async(_orig_aiohttp_request, self, method, str_or_url, **kwargs)
+        send_kwargs = dict(kwargs)
+        t0 = time.time()
+        method_s = str(method or "GET").upper()
+        try:
+            raw = str(str_or_url)
+        except Exception:
+            raw = ""
+        scheme = "https" if raw.startswith("https") else "http"
+        try:
+            resp = await _http_orig_async(_orig_aiohttp_request, self, method, str_or_url, **send_kwargs)
+            _account_response_bytes(getattr(resp, "headers", None))
+            if record_send:
+                action = "OBSERVED"
+                _record_http_response(
+                    hostname,
+                    action,
+                    "python_aiohttp",
+                    getattr(resp, "status", None),
+                    t0,
+                    method=method_s,
+                    path=path,
+                    scheme=scheme,
+                )
+            return resp
+        except Exception as exc:
+            _record_http_exception(
+                hostname,
+                "python_aiohttp",
+                exc,
+                t0,
+                record_send=record_send,
+                action="OBSERVED",
+                method=method_s,
+                path=path,
+                scheme=scheme,
+            )
+            raise
+
+    _aiohttp.ClientSession._request = _observe_request  # type: ignore[assignment]
+
+
+def _uninstall_aiohttp() -> None:
+    global _orig_aiohttp_request
+    if _orig_aiohttp_request is None:
+        return
+    try:
+        if _aiohttp is not None:
+            _aiohttp.ClientSession._request = _orig_aiohttp_request
+    except Exception:
+        pass
+    _orig_aiohttp_request = None
+
+
+def _addr_host_port(address: Any) -> tuple[Optional[str], Optional[str], bool]:
+    """Return (hostname, port, is_ipc). Never raises."""
+    try:
+        if isinstance(address, bytes):
+            address = address.decode("utf-8", "replace")
+        if isinstance(address, str):
+            return None, None, True
+        if isinstance(address, (tuple, list)) and address:
+            host = address[0]
+            port = address[1] if len(address) > 1 else None
+            if isinstance(host, bytes):
+                host = host.decode("utf-8", "replace")
+            if isinstance(host, str) and ("/" in host or host.startswith("\0")):
+                return None, None, True
+            hostname = str(host).replace("[", "").replace("]", "") if host else None
+            return hostname, (str(port) if port is not None else None), False
+    except Exception:
+        return None, None, False
+    return None, None, False
+
+
+def _gate_socket_dest(hostname: Optional[str], port: Optional[str]) -> tuple[str, bool]:
+    """Return (decision, record_after).
+
+    decision is pass or connect. record_after is true when the caller should
+    time the real connect and store that duration.
+    """
+    if not hostname or _http_owns() or _is_control_plane_dest(hostname, port):
+        return "pass", False
+    kind, _payload, _redactions, record_send = _dispatch_gate(
+        hostname, port, "/", None, "python_socket"
+    )
+    if kind == "pass":
+        return "pass", False
+    return "connect", bool(record_send)
+
+
+def _record_socket_timing(
+    hostname: str,
+    t0: float,
+    *,
+    ok: bool,
+    error_class: Optional[str] = None,
+) -> None:
+    action = "OBSERVED"
+    extra: dict[str, Any] = {
+        "ok": ok,
+        "duration_ms": max(0, int((time.perf_counter() - t0) * 1000)),
+    }
+    if not ok:
+        kind, phrase = socket_failure(error_class or "OSError")
+        extra["error"] = "network_error"
+        extra["error_class"] = error_class or "OSError"
+        extra["failure_kind"] = kind
+        extra["failure_response"] = phrase
+    _record(hostname, action, "python_socket", **extra)
+
+
+def _observe_socket_connect(self: Any, address: Any, *args: Any, **kwargs: Any) -> Any:
+    hostname, port, ipc = _addr_host_port(address)
+    if ipc:
+        return _orig_socket_connect(self, address, *args, **kwargs)
+    decision, record_after = _gate_socket_dest(hostname, port)
+    if decision != "connect" or not record_after:
+        return _orig_socket_connect(self, address, *args, **kwargs)
+    t0 = time.perf_counter()
+    try:
+        result = _orig_socket_connect(self, address, *args, **kwargs)
+    except Exception as exc:
+        _record_socket_timing(hostname or "", t0, ok=False, error_class=type(exc).__name__)
+        raise
+    _record_socket_timing(hostname or "", t0, ok=True)
+    return result
+
+
+def _observe_socket_connect_ex(self: Any, address: Any) -> Any:
+    hostname, port, ipc = _addr_host_port(address)
+    if ipc:
+        return _orig_socket_connect_ex(self, address)
+    decision, record_after = _gate_socket_dest(hostname, port)
+    if decision != "connect" or not record_after:
+        return _orig_socket_connect_ex(self, address)
+    t0 = time.perf_counter()
+    try:
+        rc = _orig_socket_connect_ex(self, address)
+    except Exception as exc:
+        _record_socket_timing(hostname or "", t0, ok=False, error_class=type(exc).__name__)
+        raise
+    if rc:
+        _record_socket_timing(hostname or "", t0, ok=False, error_class="connect_ex")
+    else:
+        _record_socket_timing(hostname or "", t0, ok=True)
+    return rc
+
+
+def _observe_ssl_connect(self: Any, address: Any, *args: Any, **kwargs: Any) -> Any:
+    hostname, port, ipc = _addr_host_port(address)
+    if ipc:
+        with _http_handled():
+            return _orig_ssl_connect(self, address, *args, **kwargs)
+    decision, record_after = _gate_socket_dest(hostname, port)
+    if decision != "connect" or not record_after or _orig_ssl_connect is None:
+        with _http_handled():
+            return _orig_ssl_connect(self, address, *args, **kwargs)
+    t0 = time.perf_counter()
+    try:
+        with _http_handled():
+            result = _orig_ssl_connect(self, address, *args, **kwargs)
+    except Exception as exc:
+        _record_socket_timing(hostname or "", t0, ok=False, error_class=type(exc).__name__)
+        raise
+    _record_socket_timing(hostname or "", t0, ok=True)
+    return result
+
+
+def _observe_create_connection(address: Any, *args: Any, **kwargs: Any) -> Any:
+    hostname, port, ipc = _addr_host_port(address)
+    if ipc:
+        with _http_handled():
+            return _orig_create_connection(address, *args, **kwargs)
+    decision, record_after = _gate_socket_dest(hostname, port)
+    if decision != "connect" or not record_after:
+        with _http_handled():
+            return _orig_create_connection(address, *args, **kwargs)
+    t0 = time.perf_counter()
+    try:
+        with _http_handled():
+            result = _orig_create_connection(address, *args, **kwargs)
+    except Exception as exc:
+        _record_socket_timing(hostname or "", t0, ok=False, error_class=type(exc).__name__)
+        raise
+    _record_socket_timing(hostname or "", t0, ok=True)
+    return result
+
+
+def _install_socket() -> None:
+    global _orig_socket_connect, _orig_socket_connect_ex, _orig_create_connection, _orig_ssl_connect
+    if _orig_socket_connect is not None:
+        return
+    _orig_socket_connect = socket.socket.connect
+    _orig_socket_connect_ex = socket.socket.connect_ex
+    _orig_create_connection = socket.create_connection
+    ssl_own = None
+    try:
+        ssl_own = ssl.SSLSocket.connect
+        if ssl_own is _orig_socket_connect:
+            ssl_own = None
+    except Exception:
+        ssl_own = None
+    socket.socket.connect = _observe_socket_connect  # type: ignore[method-assign]
+    socket.socket.connect_ex = _observe_socket_connect_ex  # type: ignore[method-assign]
+    socket.create_connection = _observe_create_connection  # type: ignore[assignment]
+    if ssl_own is not None:
+        _orig_ssl_connect = ssl_own
+        ssl.SSLSocket.connect = _observe_ssl_connect  # type: ignore[method-assign]
+    else:
+        _orig_ssl_connect = None
+
+
+def _uninstall_socket() -> None:
+    global _orig_socket_connect, _orig_socket_connect_ex, _orig_create_connection, _orig_ssl_connect
+    try:
+        if _orig_socket_connect is not None:
+            socket.socket.connect = _orig_socket_connect
+        if _orig_socket_connect_ex is not None:
+            socket.socket.connect_ex = _orig_socket_connect_ex
+        if _orig_create_connection is not None:
+            socket.create_connection = _orig_create_connection
+        if _orig_ssl_connect is not None:
+            ssl.SSLSocket.connect = _orig_ssl_connect
+    except Exception:
+        pass
+    _orig_socket_connect = None
+    _orig_socket_connect_ex = None
+    _orig_create_connection = None
+    _orig_ssl_connect = None
+
+
+def _http_conn_host_port(conn: Any) -> tuple[str, Optional[str]]:
+    host = str(getattr(conn, "host", "") or "")
+    port = getattr(conn, "port", None)
+    return host, (str(port) if port is not None else None)
+
+
+def _observe_http_client_request(
+    self: Any,
+    method: Any,
+    url: Any,
+    body: Any = None,
+    headers: Any = None,
+    encode_chunked: bool = False,
+) -> Any:
+    if _http_owns():
+        return _orig_http_request(self, method, url, body, headers or {}, encode_chunked=encode_chunked)
+    hostname, port = _http_conn_host_port(self)
+    path = str(url or "/").split("?")[0] or "/"
+    kind, payload, redactions, record_send = _dispatch_gate(
+        hostname, port, path, body, "python_http_client"
+    )
+    if kind == "pass":
+        return _http_orig(
+            _orig_http_request, self, method, url, body, headers or {}, encode_chunked=encode_chunked
+        )
+    t0 = time.time()
+    method_s = str(method or "GET").upper()
+    try:
+        resp = _http_orig(
+            _orig_http_request, self, method, url, body, headers or {}, encode_chunked=encode_chunked
+        )
+        if record_send and getattr(self, "_vantio_pending", None) is None:
+            action = "OBSERVED"
+            rec = _record(
+                hostname, action, "python_http_client", method=method_s, path=path, ok=True,
+                duration_ms=int((time.time() - t0) * 1000),
+            )
+            _, _, nbytes = _body_to_text(body)
+            self._vantio_pending = {"rec": rec, "path": path, "t0": t0, "request_bytes": nbytes}
+        return resp
+    except Exception as exc:
+        _record_http_exception(
+            hostname,
+            "python_http_client",
+            exc,
+            t0,
+            record_send=True,
+            action="OBSERVED",
+            method=method_s,
+            path=path,
+        )
+        raise
+
+
+def _observe_http_client_putrequest(
+    self: Any,
+    method: Any,
+    url: Any,
+    skip_host: bool = False,
+    skip_accept_encoding: bool = False,
+) -> Any:
+    if _http_owns():
+        return _orig_http_putrequest(self, method, url, skip_host, skip_accept_encoding)
+    hostname, port = _http_conn_host_port(self)
+    path = str(url or "/").split("?")[0] or "/"
+    kind, _payload, _redactions, record_send = _dispatch_gate(
+        hostname, port, path, None, "python_http_client"
+    )
+    if kind != "pass" and record_send and getattr(self, "_vantio_pending", None) is None:
+        action = "OBSERVED"
+        rec = _record(
+            hostname, action, "python_http_client",
+            method=str(method or "GET").upper(), path=path,
+        )
+        self._vantio_pending = {"rec": rec, "path": path, "t0": time.time(), "request_bytes": None}
+    return _http_orig(_orig_http_putrequest, self, method, url, skip_host, skip_accept_encoding)
+
+
+def _observe_http_client_getresponse(self: Any, *args: Any, **kwargs: Any) -> Any:
+    if _http_owns():
+        return _orig_http_getresponse(self, *args, **kwargs)
+    pending = getattr(self, "_vantio_pending", None)
+    try:
+        resp = _orig_http_getresponse(self, *args, **kwargs)
+    except Exception:
+        self._vantio_pending = None
+        raise
+    self._vantio_pending = None
+    if pending and isinstance(pending.get("rec"), dict):
+        status = getattr(resp, "status", None)
+        rec = pending["rec"]
+        rec["status"] = _normalize_http_status(status)
+        rec["ok"] = _ok_for_http_status(status)
+        rec["applicationStatus"] = _application_status(status)
+        try:
+            cl = resp.getheader("Content-Length") if hasattr(resp, "getheader") else None
+            if cl is not None and str(cl).strip() != "":
+                rec["bytes"] = int(cl)
+        except (TypeError, ValueError):
+            pass
+        apply_customer_outcome(rec)
+    return resp
+
+
+def _install_http_client() -> None:
+    global _orig_http_request, _orig_http_putrequest, _orig_http_getresponse
+    if _orig_http_request is not None:
+        return
+    _orig_http_request = http.client.HTTPConnection.request
+    _orig_http_putrequest = http.client.HTTPConnection.putrequest
+    _orig_http_getresponse = http.client.HTTPConnection.getresponse
+    http.client.HTTPConnection.request = _observe_http_client_request  # type: ignore[assignment]
+    http.client.HTTPConnection.putrequest = _observe_http_client_putrequest  # type: ignore[assignment]
+    http.client.HTTPConnection.getresponse = _observe_http_client_getresponse  # type: ignore[assignment]
+
+
+def _uninstall_http_client() -> None:
+    global _orig_http_request, _orig_http_putrequest, _orig_http_getresponse
+    try:
+        if _orig_http_request is not None:
+            http.client.HTTPConnection.request = _orig_http_request
+        if _orig_http_putrequest is not None:
+            http.client.HTTPConnection.putrequest = _orig_http_putrequest
+        if _orig_http_getresponse is not None:
+            http.client.HTTPConnection.getresponse = _orig_http_getresponse
+    except Exception:
+        pass
+    _orig_http_request = None
+    _orig_http_putrequest = None
+    _orig_http_getresponse = None
+
+
+def _observe_urllib3_urlopen(self: Any, method: Any, url: Any, *args: Any, **kwargs: Any) -> Any:
+    # urllib3 retries call urlopen again with extra positional arguments.
+    # That re-entry is the same attempt; forward it unchanged.
+    if _http_owns():
+        return _orig_urllib3_request(self, method, url, *args, **kwargs)
+    body = args[0] if args else kwargs.get("body")
+    hostname, port = _http_conn_host_port(self)
+    path = str(url or "/").split("?")[0] or "/"
+    kind, payload, redactions, record_send = _dispatch_gate(
+        hostname, port, path, body, "python_urllib3"
+    )
+    if kind == "pass":
+        return _http_orig(_orig_urllib3_request, self, method, url, *args, **kwargs)
+    call_args = args
+    call_kwargs = kwargs
+    t0 = time.time()
+    method_s = str(method or "GET").upper()
+    try:
+        resp = _http_orig(
+            _orig_urllib3_request, self, method, url, *call_args, **call_kwargs
+        )
+        if record_send:
+            action = "OBSERVED"
+            _record_http_response(
+                hostname,
+                action,
+                "python_urllib3",
+                getattr(resp, "status", None),
+                t0,
+                method=method_s,
+                path=path,
+            )
+        return resp
+    except Exception as exc:
+        _record_http_exception(
+            hostname,
+            "python_urllib3",
+            exc,
+            t0,
+            record_send=record_send,
+            action="OBSERVED",
+            method=method_s,
+            path=path,
+        )
+        raise
+
+
+def _install_urllib3() -> None:
+    global _orig_urllib3_request
+    if _urllib3 is None or _orig_urllib3_request is not None:
+        return
+    pool_mod = getattr(_urllib3, "connectionpool", None)
+    if pool_mod is None:
+        try:
+            from urllib3 import connectionpool as pool_mod
+        except ImportError:
+            return
+    pool_cls = getattr(pool_mod, "HTTPConnectionPool", None) if pool_mod is not None else None
+    if pool_cls is None:
+        return
+    current = getattr(pool_cls, "urlopen", None)
+    if current is None or current is _observe_urllib3_urlopen:
+        return
+    _orig_urllib3_request = current
+    pool_cls.urlopen = _observe_urllib3_urlopen  # type: ignore[assignment]
+
+
+def _uninstall_urllib3() -> None:
+    global _orig_urllib3_request
+    try:
+        if _orig_urllib3_request is not None and _urllib3 is not None:
+            pool_mod = getattr(_urllib3, "connectionpool", None)
+            pool_cls = getattr(pool_mod, "HTTPConnectionPool", None) if pool_mod is not None else None
+            if pool_cls is not None:
+                pool_cls.urlopen = _orig_urllib3_request
+    except Exception:
+        pass
+    _orig_urllib3_request = None
+
+
+def _cmd_base(file: Any) -> str:
+    try:
+        name = os.path.basename(str(file or "")).lower()
+        if name.endswith(".exe"):
+            name = name[:-4]
+        return name
+    except Exception:
+        return ""
+
+
+def _tokenize_shell(s: str) -> list[str]:
+    try:
+        return shlex.split(str(s or ""), posix=True)
+    except Exception:
+        return []
+
+
+def _strip_spawn_prefixes(tokens: list[str]) -> list[str]:
+    i = 0
+    n = len(tokens)
+    while i < n:
+        base = _cmd_base(tokens[i])
+        if base not in ("env", "timeout", "nice"):
+            return tokens[i:]
+        i += 1
+        if base == "env":
+            while i < n:
+                t = tokens[i]
+                if t.startswith("-"):
+                    if t in ("-u", "--unset") and i + 1 < n:
+                        i += 2
+                    else:
+                        i += 1
+                    continue
+                if "=" in t:
+                    i += 1
+                    continue
+                break
+            continue
+        if base == "timeout":
+            while i < n and tokens[i].startswith("-"):
+                if tokens[i] in ("-s", "--signal", "-k", "--kill-after") and i + 1 < n:
+                    i += 2
+                else:
+                    i += 1
+            if i < n:
+                i += 1
+            continue
+        if base == "nice":
+            if i < n and tokens[i] in ("-n", "--adjustment") and i + 1 < n:
+                i += 2
+            elif i < n and tokens[i].startswith("-") and tokens[i][1:].lstrip("-").isdigit():
+                i += 1
+            continue
+    return tokens[i:] if i < n else []
+
+
+def _canonical_cli_tool(base: str) -> Optional[str]:
+    if base == "curl":
+        return "curl"
+    if base == "wget":
+        return "wget"
+    if base in ("http", "https", "httpie"):
+        return "httpie"
+    if base in ("aria2c", "aria2"):
+        return "aria2c"
+    return None
+
+
+def _cli_from_tokens(tokens: list[str]) -> Optional[tuple[str, list[str]]]:
+    stripped = _strip_spawn_prefixes([str(t) for t in tokens])
+    if not stripped:
+        return None
+    direct = _canonical_cli_tool(_cmd_base(stripped[0]))
+    if direct:
+        return direct, stripped[1:]
+    if _cmd_base(stripped[0]) not in ("sh", "bash", "dash", "zsh"):
+        return None
+    args = stripped[1:]
+    try:
+        c_idx = args.index("-c")
+    except ValueError:
+        return None
+    if c_idx + 1 >= len(args):
+        return None
+    inner = _strip_spawn_prefixes(_tokenize_shell(args[c_idx + 1]))
+    if not inner:
+        return None
+    tool = _canonical_cli_tool(_cmd_base(inner[0]))
+    if not tool:
+        return None
+    return tool, inner[1:]
+
+
+def _http_cli_from_spawn(command: Any, argv: Any) -> Optional[tuple[str, list[str]]]:
+    args = [str(a) for a in list(argv or [])]
+    return _cli_from_tokens([str(command)] + args)
+
+
+def _http_cli_from_exec(command: Any) -> Optional[tuple[str, list[str]]]:
+    tokens = _tokenize_shell(str(command or ""))
+    if not tokens:
+        return None
+    return _cli_from_tokens(tokens)
+
+
+def _http_cli_from_popen(args: Any, kwargs: dict[str, Any]) -> Optional[tuple[str, list[str]]]:
+    shell = bool(kwargs.get("shell"))
+    if isinstance(args, bytes):
+        args = args.decode("utf-8", "replace")
+    if isinstance(args, str):
+        if shell:
+            return _http_cli_from_exec(args)
+        return _cli_from_tokens([args])
+    try:
+        seq = list(args)
+    except TypeError:
+        return None
+    if not seq:
+        return None
+    if shell:
+        return _http_cli_from_exec(" ".join(str(x) for x in seq))
+    return _cli_from_tokens([str(x) for x in seq])
+
+
+def _stdin_byte_length(kwargs: Optional[dict[str, Any]]) -> int:
+    kwargs = kwargs or {}
+    data = kwargs.get("input")
+    if data is not None:
+        try:
+            if isinstance(data, bytes):
+                return len(data)
+            if isinstance(data, str):
+                enc = str(kwargs.get("encoding") or "utf-8")
+                return len(data.encode(enc, "replace"))
+        except Exception:
+            return 0
+    stdin = kwargs.get("stdin", None)
+    fd: Optional[int] = None
+    if stdin is None:
+        try:
+            fd = sys.stdin.fileno()
+        except Exception:
+            return 0
+    elif stdin in (subprocess.PIPE, subprocess.DEVNULL):
+        return 0
+    elif isinstance(stdin, int):
+        fd = stdin
+    else:
+        try:
+            fd = stdin.fileno()
+        except Exception:
+            return 0
+    try:
+        st = os.fstat(fd)
+        if stat.S_ISREG(st.st_mode):
+            return int(st.st_size) or 0
+    except Exception:
+        return 0
+    return 0
+
+
+def _file_byte_length(rel: Any, stdin_size: int = 0) -> int:
+    p = str(rel or "")
+    if not p:
+        return 0
+    if p == "-":
+        return int(stdin_size) or 0
+    try:
+        if os.path.isfile(p):
+            return int(os.stat(p).st_size) or 0
+    except Exception:
+        return 0
+    return 0
+
+
+def _bytes_from_at_or_literal(value: Any, at_means_file: bool, stdin_size: int = 0) -> int:
+    v = str(value if value is not None else "")
+    if at_means_file and v.startswith("@"):
+        return _file_byte_length(v[1:], stdin_size)
+    return len(v.encode("utf-8"))
+
+
+def _bytes_from_curl_form_value(value: Any, treat_at_as_file: bool, stdin_size: int = 0) -> int:
+    v = str(value if value is not None else "")
+    eq = v.find("=")
+    rhs = v[eq + 1:] if eq >= 0 else v
+    if not treat_at_as_file:
+        return len(rhs.encode("utf-8"))
+    if rhs.startswith("@") or rhs.startswith("<"):
+        path = rhs[1:]
+        semi = path.find(";")
+        if semi >= 0:
+            path = path[:semi]
+        return _file_byte_length(path, stdin_size)
+    return len(rhs.encode("utf-8"))
+
+
+def _urls_from_list_file(path: str, stdin_size: int = 0, kwargs: Optional[dict[str, Any]] = None) -> list[str]:
+    cap = 65536
+    max_urls = 32
+    text = ""
+    kwargs = kwargs or {}
+    try:
+        if str(path or "") == "-":
+            data = kwargs.get("input")
+            if data is not None:
+                if isinstance(data, bytes):
+                    text = data[:cap].decode("utf-8", "replace")
+                else:
+                    text = str(data)[:cap]
+            else:
+                if not stdin_size:
+                    return []
+                stdin = kwargs.get("stdin", None)
+                fd = 0
+                if isinstance(stdin, int):
+                    fd = stdin
+                elif stdin is not None and stdin not in (subprocess.PIPE, subprocess.DEVNULL):
+                    fd = stdin.fileno()
+                elif stdin is None:
+                    fd = sys.stdin.fileno()
+                raw = os.pread(fd, min(int(stdin_size) or 0, cap), 0)
+                text = raw.decode("utf-8", "replace")
+        else:
+            fd = os.open(str(path), os.O_RDONLY)
+            try:
+                raw = os.read(fd, cap)
+                text = raw.decode("utf-8", "replace")
+            finally:
+                os.close(fd)
+    except Exception:
+        return []
+    urls: list[str] = []
+    for line in text.splitlines():
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        token = s.split()[0]
+        if token.startswith("http://") or token.startswith("https://"):
+            urls.append(token)
+        if len(urls) >= max_urls:
+            break
+    return urls
+
+
+_CURL_DATA_AT_FILE = {
+    "-d": True,
+    "--data": True,
+    "--data-binary": True,
+    "--data-ascii": True,
+    "--data-urlencode": True,
+    "--json": True,
+    "--data-raw": False,
+}
+
+
+def _url_from_curl_config(path: str) -> Optional[str]:
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                s = line.strip()
+                if not s or s.startswith("#"):
+                    continue
+                lower = s.lower()
+                if not lower.startswith("url"):
+                    continue
+                rest = s[3:].lstrip()
+                if rest.startswith("="):
+                    rest = rest[1:].strip()
+                rest = rest.strip("\"'")
+                if rest.startswith("http://") or rest.startswith("https://"):
+                    return rest
+    except Exception:
+        return None
+    return None
+
+
+def _parse_curl_argv(argv: list[str], stdin_size: int = 0) -> tuple[list[str], int]:
+    url: Optional[str] = None
+    data_bytes = 0
+    config_paths: list[str] = []
+    args = [str(a) for a in argv]
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a in ("--url", "-url"):
+            url = args[i + 1] if i + 1 < len(args) else None
+            i += 2
+            continue
+        if a.startswith("--url="):
+            url = a[len("--url="):]
+            i += 1
+            continue
+        if a in ("-K", "--config"):
+            if i + 1 < len(args):
+                config_paths.append(args[i + 1])
+            i += 2
+            continue
+        if a.startswith("--config="):
+            config_paths.append(a[len("--config="):])
+            i += 1
+            continue
+        if a in _CURL_DATA_AT_FILE:
+            value = args[i + 1] if i + 1 < len(args) else ""
+            data_bytes += _bytes_from_at_or_literal(value, _CURL_DATA_AT_FILE[a], stdin_size)
+            i += 2
+            continue
+        eq_handled = False
+        for flag, at_file in _CURL_DATA_AT_FILE.items():
+            if flag.startswith("--") and a.startswith(flag + "="):
+                data_bytes += _bytes_from_at_or_literal(a[len(flag) + 1:], at_file, stdin_size)
+                eq_handled = True
+                break
+        if eq_handled:
+            i += 1
+            continue
+        if a.startswith("-d") and len(a) > 2 and not a.startswith("--"):
+            data_bytes += _bytes_from_at_or_literal(a[2:], True, stdin_size)
+            i += 1
+            continue
+        if a in ("-F", "--form"):
+            data_bytes += _bytes_from_curl_form_value(args[i + 1] if i + 1 < len(args) else "", True, stdin_size)
+            i += 2
+            continue
+        if a.startswith("--form="):
+            data_bytes += _bytes_from_curl_form_value(a[len("--form="):], True, stdin_size)
+            i += 1
+            continue
+        if a.startswith("-F") and len(a) > 2 and not a.startswith("--"):
+            data_bytes += _bytes_from_curl_form_value(a[2:], True, stdin_size)
+            i += 1
+            continue
+        if a == "--form-string":
+            data_bytes += _bytes_from_curl_form_value(args[i + 1] if i + 1 < len(args) else "", False, stdin_size)
+            i += 2
+            continue
+        if a.startswith("--form-string="):
+            data_bytes += _bytes_from_curl_form_value(a[len("--form-string="):], False, stdin_size)
+            i += 1
+            continue
+        if a in ("-T", "--upload-file"):
+            data_bytes += _file_byte_length(args[i + 1] if i + 1 < len(args) else "", stdin_size)
+            i += 2
+            continue
+        if a.startswith("--upload-file="):
+            data_bytes += _file_byte_length(a[len("--upload-file="):], stdin_size)
+            i += 1
+            continue
+        if a.startswith("-T") and len(a) > 2 and not a.startswith("--"):
+            data_bytes += _file_byte_length(a[2:], stdin_size)
+            i += 1
+            continue
+        if url is None and (a.startswith("http://") or a.startswith("https://")):
+            url = a
+        i += 1
+    if url is None:
+        for path in config_paths:
+            found = _url_from_curl_config(path)
+            if found:
+                url = found
+                break
+    return ([url] if url else []), data_bytes
+
+
+def _take_input_file_arg(args: list[str], i: int, a: str) -> Optional[tuple[str, int]]:
+    if a in ("-i", "--input-file"):
+        return (args[i + 1] if i + 1 < len(args) else ""), i + 2
+    if a.startswith("--input-file="):
+        return a[len("--input-file="):], i + 1
+    return None
+
+
+def _parse_wget_argv(argv: list[str], stdin_size: int = 0, kwargs: Optional[dict[str, Any]] = None) -> tuple[list[str], int]:
+    url: Optional[str] = None
+    data_bytes = 0
+    list_paths: list[str] = []
+    args = [str(a) for a in argv]
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a in ("--post-data", "--body-data"):
+            value = args[i + 1] if i + 1 < len(args) else ""
+            data_bytes += len(str(value).encode("utf-8"))
+            i += 2
+            continue
+        if a.startswith("--post-data="):
+            data_bytes += len(a[len("--post-data="):].encode("utf-8"))
+            i += 1
+            continue
+        if a.startswith("--body-data="):
+            data_bytes += len(a[len("--body-data="):].encode("utf-8"))
+            i += 1
+            continue
+        if a in ("--post-file", "--body-file"):
+            data_bytes += _file_byte_length(args[i + 1] if i + 1 < len(args) else "", stdin_size)
+            i += 2
+            continue
+        if a.startswith("--post-file="):
+            data_bytes += _file_byte_length(a[len("--post-file="):], stdin_size)
+            i += 1
+            continue
+        if a.startswith("--body-file="):
+            data_bytes += _file_byte_length(a[len("--body-file="):], stdin_size)
+            i += 1
+            continue
+        taken = _take_input_file_arg(args, i, a)
+        if taken is not None:
+            path, nxt = taken
+            if path:
+                list_paths.append(path)
+            i = nxt
+            continue
+        if url is None and (a.startswith("http://") or a.startswith("https://")):
+            url = a
+        i += 1
+    urls: list[str] = []
+    if url:
+        urls.append(url)
+    for path in list_paths:
+        for found in _urls_from_list_file(path, stdin_size, kwargs):
+            if found not in urls:
+                urls.append(found)
+    return urls, data_bytes
+
+
+def _parse_url_only_argv(argv: list[str], stdin_size: int = 0, kwargs: Optional[dict[str, Any]] = None) -> tuple[list[str], int]:
+    urls: list[str] = []
+    list_paths: list[str] = []
+    args = [str(a) for a in argv]
+    i = 0
+    while i < len(args):
+        a = args[i]
+        taken = _take_input_file_arg(args, i, a)
+        if taken is not None:
+            path, nxt = taken
+            if path:
+                list_paths.append(path)
+            i = nxt
+            continue
+        if (a.startswith("http://") or a.startswith("https://")) and a not in urls:
+            urls.append(a)
+        i += 1
+    for path in list_paths:
+        for found in _urls_from_list_file(path, stdin_size, kwargs):
+            if found not in urls:
+                urls.append(found)
+    return urls, 0
+
+
+def _parse_cli_argv(tool: str, argv: list[str], kwargs: Optional[dict[str, Any]] = None) -> tuple[list[str], int]:
+    stdin_size = _stdin_byte_length(kwargs)
+    if tool == "wget":
+        return _parse_wget_argv(argv, stdin_size, kwargs)
+    if tool in ("httpie", "aria2c"):
+        return _parse_url_only_argv(argv, stdin_size, kwargs)
+    return _parse_curl_argv(argv, stdin_size)
+
+
+def _cli_mediation(tool: str) -> str:
+    if tool == "wget":
+        return "python_wget"
+    if tool == "httpie":
+        return "python_httpie"
+    if tool == "aria2c":
+        return "python_aria2c"
+    return "python_curl"
+
+
+def _apply_cli_gate(
+    tool: str, argv: list[str], kwargs: Optional[dict[str, Any]] = None
+) -> None:
+    """Record in-scope CLI HTTP tools. Optics does not block or rewrite argv."""
+    global _spent_usd
+    urls, data_bytes = _parse_cli_argv(tool, argv, kwargs)
+    if not urls:
+        return
+    mediation = _cli_mediation(tool)
+    for url in urls:
+        hostname, port, path = _host_port_from_url(url)
+        if _decide(hostname, port, path, data_bytes) != "observe":
+            continue
+        _record(
+            hostname,
+            "OBSERVED",
+            mediation,
+            path=path,
+            bytes_observed=data_bytes,
+        )
+        _spent_usd += (data_bytes or 0) * _USD_PER_BYTE
+
+
+class _VantioPopen(subprocess.Popen):
+    def __init__(self, args: Any, *pargs: Any, **kwargs: Any) -> None:
+        try:
+            cli = _http_cli_from_popen(args, kwargs)
+            if cli is not None:
+                _apply_cli_gate(cli[0], cli[1], kwargs)
+        except Exception:
+            pass
+        super().__init__(args, *pargs, **kwargs)
+
+
+def _observe_os_system(command: Any) -> Any:
+    try:
+        cli = _http_cli_from_exec(command)
+        if cli is not None:
+            _apply_cli_gate(cli[0], cli[1])
+    except Exception:
+        pass
+    return _orig_os_system(command)
+
+
+async def _observe_asyncio_exec(program: Any, *args: Any, **kwargs: Any) -> Any:
+    try:
+        cli = _http_cli_from_spawn(program, args)
+        if cli is not None:
+            _apply_cli_gate(cli[0], cli[1], kwargs)
+    except Exception:
+        pass
+    return await _orig_asyncio_exec(program, *args, **kwargs)
+
+
+async def _observe_asyncio_shell(cmd: Any, **kwargs: Any) -> Any:
+    try:
+        cli = _http_cli_from_exec(cmd)
+        if cli is not None:
+            _apply_cli_gate(cli[0], cli[1], kwargs)
+    except Exception:
+        pass
+    return await _orig_asyncio_shell(cmd, **kwargs)
+
+
+def _install_curl_spawn() -> None:
+    global _orig_popen, _orig_os_system, _orig_asyncio_exec, _orig_asyncio_shell
+    if _orig_popen is not None:
+        return
+    _orig_popen = subprocess.Popen
+    subprocess.Popen = _VantioPopen  # type: ignore[misc,assignment]
+    _orig_os_system = os.system
+    os.system = _observe_os_system  # type: ignore[assignment]
+    _orig_asyncio_exec = asyncio.create_subprocess_exec
+    _orig_asyncio_shell = asyncio.create_subprocess_shell
+    asyncio.create_subprocess_exec = _observe_asyncio_exec  # type: ignore[assignment]
+    asyncio.create_subprocess_shell = _observe_asyncio_shell  # type: ignore[assignment]
+
+
+def _uninstall_curl_spawn() -> None:
+    global _orig_popen, _orig_os_system, _orig_asyncio_exec, _orig_asyncio_shell
+    try:
+        if _orig_popen is not None:
+            subprocess.Popen = _orig_popen
+        if _orig_os_system is not None:
+            os.system = _orig_os_system
+        if _orig_asyncio_exec is not None:
+            asyncio.create_subprocess_exec = _orig_asyncio_exec
+        if _orig_asyncio_shell is not None:
+            asyncio.create_subprocess_shell = _orig_asyncio_shell
+    except Exception:
+        pass
+    _orig_popen = None
+    _orig_os_system = None
+    _orig_asyncio_exec = None
+    _orig_asyncio_shell = None
+
+
+def _pycurl_decode(value: Any) -> str:
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value).decode("utf-8", "replace")
+    return str(value or "")
+
+
+class _VantioCurl:
+    """Python proxy around pycurl.Curl — C type methods are immutable."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        object.__setattr__(self, "_curl", _orig_pycurl_curl(*args, **kwargs))
+        object.__setattr__(self, "_vantio_url", None)
+        object.__setattr__(self, "_vantio_body", None)
+
+    def setopt(self, option: Any, value: Any) -> Any:
+        try:
+            if _pycurl is not None and option == _pycurl.URL:
+                object.__setattr__(self, "_vantio_url", _pycurl_decode(value))
+            elif _pycurl is not None and option == _pycurl.POSTFIELDS:
+                object.__setattr__(self, "_vantio_body", value)
+        except Exception:
+            pass
+        return self._curl.setopt(option, value)
+
+    def perform(self, *args: Any, **kwargs: Any) -> Any:
+        url = self._vantio_url or ""
+        body = self._vantio_body
+        hostname, port, path = _host_port_from_url(url)
+        kind, payload, redactions, record_send = _dispatch_gate(
+            hostname, port, path, body, "python_pycurl"
+        )
+        if kind == "pass":
+            return self._curl.perform(*args, **kwargs)
+        t0 = time.time()
+        try:
+            result = self._curl.perform(*args, **kwargs)
+            if record_send:
+                action = "OBSERVED"
+                _record(
+                    hostname,
+                    action,
+                    "python_pycurl",
+                    path=path,
+                    ok=True,
+                    duration_ms=int((time.time() - t0) * 1000),
+                )
+            return result
+        except Exception as exc:
+            _record_http_exception(
+                hostname,
+                "python_pycurl",
+                exc,
+                t0,
+                record_send=True,
+                action="OBSERVED",
+                path=path,
+            )
+            raise
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._curl, name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name in ("_curl", "_vantio_url", "_vantio_body"):
+            object.__setattr__(self, name, value)
+        else:
+            setattr(self._curl, name, value)
+
+
+def _install_pycurl() -> None:
+    global _orig_pycurl_curl
+    if _pycurl is None or _orig_pycurl_curl is not None:
+        return
+    current = getattr(_pycurl, "Curl", None)
+    if current is None or current is _VantioCurl:
+        return
+    _orig_pycurl_curl = current
+    _pycurl.Curl = _VantioCurl  # type: ignore[misc,assignment]
+
+
+def _uninstall_pycurl() -> None:
+    global _orig_pycurl_curl
+    try:
+        if _orig_pycurl_curl is not None and _pycurl is not None:
+            _pycurl.Curl = _orig_pycurl_curl
+    except Exception:
+        pass
+    _orig_pycurl_curl = None
+
+
+def _program_label(argv: Optional[list[str]] = None) -> str:
+    args = list(sys.argv if argv is None else argv)
+    skip_value = {"-e", "--eval", "-c", "--command"}
+    index = 1
+    while index < len(args):
+        text = str(args[index] or "")
+        if text in ("-m", "--module") and index + 1 < len(args):
+            return os.path.basename(str(args[index + 1])) or "python"
+        if text in skip_value:
+            index += 2
+            continue
+        if not text or text.startswith("-"):
+            index += 1
+            continue
+        base = os.path.basename(text)
+        if base:
+            return base
+        index += 1
+    if args:
+        return os.path.basename(str(args[0])) or "python"
+    return "python"
+
+
+def _write_run_log() -> None:
+    if not _calls or not _trace_id:
+        return
+    try:
+        home = os.environ.get("VANTIO_HOME") or os.path.join(os.path.expanduser("~"), ".vantio")
+        runs = os.path.join(home, "runs")
+        os.makedirs(runs, mode=0o700, exist_ok=True)
+        now = datetime.now(timezone.utc)
+        hosts = sorted({c.get("hostname") or "unknown" for c in _calls})
+        mediations = sorted({c.get("mediation") or "python_urllib" for c in _calls})
+        optics_status, application_status = _rollup_status(_calls)
+        customer = summarize_customer_fields(_calls, application_status)
+        payload = {
+            "vantio_run_log": "1",
+            "schema_version": 2,
+            "schema_status": SCHEMA_STATUS,
+            "plane": "optics",
+            "workflow": "sight_loop",
+            "data_note": "Developer egress data log — metadata only; never prompts or completions.",
+            "status_labels": {
+                "opticsStatus": "Optics status",
+                "applicationStatus": "Observed outcome",
+                "applicationOutcomeLabel": "Observed outcome",
+                "providerResponse": "Provider response",
+            },
+            "trace_id": _trace_id,
+            "program": _program_label(),
+            "system_hostname": socket.gethostname(),
+            "runtime": "python",
+            "mediation": ",".join(mediations),
+            "started_at": datetime.fromtimestamp(_started_ms, timezone.utc).isoformat() if _started_ms else now.isoformat(),
+            "generated_at": now.isoformat(),
+            "calls": list(_calls),
+            "summary": {
+                "total_calls": len(_calls),
+                "hosts": hosts,
+                "opticsStatus": optics_status,
+                "applicationStatus": application_status,
+                "opticsLabel": _human_status(optics_status),
+                **customer,
+            },
+            "residual": {
+                "note": "Python wrap observes urllib (urlopen and custom openers), requests/httpx/aiohttp/urllib3/pycurl when installed, http.client, socket.connect / connect_ex / create_connection, and subprocess curl/wget/httpie/aria2c to in-scope LLM hosts. File-body size is counted from stat; contents are not read. Argv is not rewritten. Optics does not block, delay, or rewrite. Browsers stay outside this wrap.",
+            },
+        }
+        safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in _trace_id)[:80]
+        path = os.path.join(runs, f"{safe}.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2)
+            fh.write("\n")
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+    except Exception:
+        return
+
+
+def install(trace_id: str) -> None:
+    global _depth, _started_ms, _trace_id
+    with _lock:
+        _depth += 1
+        if _depth == 1:
+            _calls.clear()
+            _started_ms = time.time()
+            _trace_id = trace_id
+            _load_policy()
+            urllib.request.urlopen = _observe_urlopen  # type: ignore[assignment]
+            _install_opener()
+            _install_requests()
+            _install_httpx()
+            _install_aiohttp()
+            _install_socket()
+            _install_http_client()
+            _install_urllib3()
+            _install_pycurl()
+            _install_curl_spawn()
+
+
+def uninstall() -> None:
+    global _depth
+    with _lock:
+        if _depth <= 0:
+            return
+        _depth -= 1
+        if _depth == 0:
+            urllib.request.urlopen = _orig_urlopen  # type: ignore[assignment]
+            _uninstall_opener()
+            _uninstall_requests()
+            _uninstall_httpx()
+            _uninstall_aiohttp()
+            _uninstall_socket()
+            _uninstall_urllib3()
+            _uninstall_pycurl()
+            _uninstall_http_client()
+            _uninstall_curl_spawn()
+            _write_run_log()
+            _reset_policy()

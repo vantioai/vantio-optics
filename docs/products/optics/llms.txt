@@ -1,0 +1,39 @@
+# Vantio Optics
+
+> Public manual version 1 for Vantio Optics. Free local metadata for supported AI calls. Registry check 2026-10-21: CLI `@vantio/cli@0.3.24`, PyPI `vantio-agent-sdk` 3.1.1. This tree is CLI 0.3.26 and Python 3.1.2. Contract `unstable-pre-1.0`. Optics observes. Enforcement is Phantom Engine, outside this manual.
+
+Installable behavior is CLI 0.3.24 and Python 3.1.1. Do not describe 0.3.26 or 3.1.2 as `npm install` or `pip install`.
+
+## Start here
+
+- [AI guide](AI-GUIDE.md): commands you may cite, tokens you must preserve, telemetry split, no invented coverage
+- [Version metadata](VERSION-METADATA.json): registry versions and source commit
+- [User manual](USER-MANUAL.md): full public manual
+- [Quickstart](QUICKSTART.md): demo, Node wrap, Python wrap
+- [Telemetry](TELEMETRY.md): CLI 0.3.24 and Python 3.1.1 are opt-in; Python 3.0.14 `shield()` sends unless disabled; `hosts` means customer LLM endpoint hostnames
+
+## Reference
+
+- [Installation](INSTALLATION.md)
+- [Node guide](NODE-GUIDE.md)
+- [Python guide](PYTHON-GUIDE.md)
+- [Supported paths](SUPPORTED-PATHS.md)
+- [Record reference](RECORD-REFERENCE.md)
+- [Status and outcomes](STATUS-AND-OUTCOMES.md)
+- [Privacy and security](PRIVACY-AND-SECURITY.md)
+- [Troubleshooting](TROUBLESHOOTING.md)
+- [Upgrade, rollback, uninstall](UPGRADE-ROLLBACK-UNINSTALL.md)
+- [Known limitations](KNOWN-LIMITATIONS.md)
+- [Changelog guide](CHANGELOG-GUIDE.md)
+- [Full text](llms-full.txt)
+
+## Rules for answers
+
+- Use this manual version. Do not invent commands.
+- Do not claim Optics blocks, redacts, or caps spend.
+- Do not infer coverage. A missing record is `NOT_OBSERVED`.
+- Preserve `UNKNOWN`, `UNAVAILABLE`, `PARTIAL`, `NOT_OBSERVED`, and the other status tokens.
+- Point enforcement questions to Phantom Engine docs. Do not write those docs from this tree.
+- Do not document SQLite, a UI, a stable schema, or PKG-02 as present. Coverage, new-destination, and export commands in this source tree are described in the user manual. Published npm CLI 0.3.24 does not include them.
+- Do not use Sight Loop as the product name. A stored `workflow` string `sight_loop` is leftover.
+- Examples marked illustrative are not transcripts.
