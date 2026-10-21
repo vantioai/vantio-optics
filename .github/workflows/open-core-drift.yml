@@ -1,0 +1,36 @@
+name: Open-core drift
+
+# Read-only. Compares package code here with vantioai/vantio-open-core main
+# while open-core still publishes. See the freeze in docs/publishing.md.
+
+on:
+  pull_request: {}
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 13 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    name: Package code matches open-core main
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Checkout vantio-open-core main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: vantioai/vantio-open-core
+          ref: main
+          path: .open-core
+          persist-credentials: false
+
+      - name: Compare
+        run: python3 scripts/check_open_core_drift.py .open-core
