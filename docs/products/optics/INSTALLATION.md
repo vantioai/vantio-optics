@@ -41,7 +41,7 @@ pip install 'vantio-agent-sdk==3.1.1'
 python -c 'import vantio; print(vantio.__version__)'
 ```
 
-The printed version on a fresh PyPI install is `3.1.1`. If you are working from this git tree, `vantio.__version__` is `3.1.3`. Those are different files for `vantio/_http_observe.py`. Telemetry in the 3.1.1 wheel matches this tree: off unless `VANTIO_TELEMETRY=1`. Read [PYTHON-GUIDE.md](PYTHON-GUIDE.md) before you describe HTTP outcomes.
+The printed version on a fresh PyPI install was `3.1.1` at the 2026-10-21 check; PyPI latest is now `3.1.2`. If you are working from this git tree, `vantio.__version__` is `3.1.3`. Those are different files for `vantio/_http_observe.py`. Telemetry in the 3.1.1 wheel matches this tree: off unless `VANTIO_TELEMETRY=1`. Read [PYTHON-GUIDE.md](PYTHON-GUIDE.md) before you describe HTTP outcomes.
 
 Pin `==3.1.2` for the current published package. An unpinned `pip install vantio-agent-sdk` resolved to 3.1.1 on the registry check for this manual. It will follow PyPI whenever a later release is published. `vantio-agent-sdk==3.0.14` remains available if you pin that older release.
 
