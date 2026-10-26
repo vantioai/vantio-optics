@@ -331,7 +331,7 @@ Browser paths stay outside this wrap.
 For explicit trace correlation across async hops, use the SDK alongside the CLI:
 
 ```bash
-npm install @vantio/agent-sdk@0.2.5
+npm install @vantio/agent-sdk@0.2.4
 ```
 
 ```ts

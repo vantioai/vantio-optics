@@ -12,8 +12,8 @@ This MCP lists local run logs, inspects traffic metadata, exports proofs, and di
 # from this repository
 pnpm install --filter @vantio/optics-mcp
 
-# npm latest on 2026-10-21 was 0.1.2. This directory is 0.1.3.
-npm install -g @vantio/optics-mcp@0.1.3
+# npm latest checked 2026-10-26: 0.1.2. This directory is 0.1.3 (not yet published).
+npm install -g @vantio/optics-mcp@0.1.2
 ```
 
 Generate Optics traffic first (optional but recommended):

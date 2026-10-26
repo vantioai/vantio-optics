@@ -12,8 +12,8 @@ Checked against the public registries on 2026-10-21.
 
 | Package | What a fresh install returns | What this source tree contains |
 | --- | --- | --- |
-| `@vantio/cli` (npm) | **0.3.24** | **0.3.27**. `npm install -g @vantio/cli` installs 0.3.24. |
-| `vantio-agent-sdk` (PyPI) | **3.1.1** | **3.1.3**. `pip install vantio-agent-sdk` installs 3.1.1. |
+| `@vantio/cli` (npm) | **0.3.24** | **0.3.27**. `npm install -g @vantio/cli` installed 0.3.24 at the 2026-10-21 18:19 UTC check; npm latest is now 0.3.26 (from vantio-open-core). |
+| `vantio-agent-sdk` (PyPI) | **3.1.1** | **3.1.3**. `pip install vantio-agent-sdk` installed 3.1.1 at the 2026-10-21 18:19 UTC check; PyPI latest is now 3.1.2 (from vantio-open-core). |
 | `@vantio/agent-sdk` (npm) | **0.2.4** | **0.2.5**. This package does not write `~/.vantio/runs`. |
 | `@vantio/optics-mcp` (npm) | **0.1.2** | **0.1.3**. Read-only local log reader. |
 

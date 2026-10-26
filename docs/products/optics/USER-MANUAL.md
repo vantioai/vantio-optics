@@ -104,7 +104,7 @@ CLI 0.3.24 does not send the ping unless `VANTIO_TELEMETRY=1`. Published Python 
 
 ## Read-only MCP
 
-`@vantio/optics-mcp@0.1.3` lists and renders local logs over the Model Context Protocol. It does not block or redact. Its tools are `optics_list_runs`, `optics_get_run`, `optics_prove`, `optics_discover_local`, `optics_explain`, and `optics_upgrade_path`. The last tool points at Phantom Engine. This manual does not document Phantom Engine.
+`@vantio/optics-mcp` (source in this commit is 0.1.3, not yet published) lists and renders local logs over the Model Context Protocol. It does not block or redact. Its tools are `optics_list_runs`, `optics_get_run`, `optics_prove`, `optics_discover_local`, `optics_explain`, and `optics_upgrade_path`. The last tool points at Phantom Engine. This manual does not document Phantom Engine.
 
 The MCP reader follows `VANTIO_HOME`. `vantio discover`, `search`, `tail`, `diff`, and `prove` read `~/.vantio` only. `vantio coverage`, `vantio destinations`, and `vantio export` read both, and they keep the allowlist and seen-destination file under `VANTIO_HOME` when that variable is set.
 

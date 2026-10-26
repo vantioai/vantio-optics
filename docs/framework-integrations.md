@@ -37,7 +37,7 @@ await shield(async () => {
 ```
 
 ```bash
-npm install @vantio/agent-sdk@0.2.5
+npm install @vantio/agent-sdk@0.2.4
 vantio run node agent.js
 ```
 

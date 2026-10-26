@@ -10,23 +10,23 @@ Free Optics needs no account and no API key.
 
 ## Install
 
-These versions are what the public registries returned on 2026-10-21. Pin them. An unpinned install follows whatever the registry marks latest later.
+These versions are what the public registries returned on 2026-10-26. Pin them. An unpinned install follows whatever the registry marks latest later.
 
 | Package | Registry | Version | Install |
 | --- | --- | --- | --- |
-| `@vantio/cli` | npm | 0.3.24 | `npm install -g @vantio/cli@0.3.24` |
-| `vantio-agent-sdk` | PyPI | 3.1.1 | `pip install 'vantio-agent-sdk==3.1.1'` |
+| `@vantio/cli` | npm | 0.3.26 | `npm install -g @vantio/cli@0.3.26` |
+| `vantio-agent-sdk` | PyPI | 3.1.2 | `pip install 'vantio-agent-sdk==3.1.2'` |
 | `@vantio/agent-sdk` | npm | 0.2.4 | `npm install @vantio/agent-sdk@0.2.4` |
 | `@vantio/optics-mcp` | npm | 0.1.2 | `npx -y @vantio/optics-mcp@0.1.2` |
 
 `@vantio/cli` needs Node.js `>=18.3.0`. `vantio-agent-sdk` needs Python `>=3.10`. There is no installer at `https://vantio.ai/install.sh`.
 
-This tree's versions are the first release numbers from this repository: `@vantio/cli` **0.3.27**, `@vantio/agent-sdk` **0.2.5**, `@vantio/optics-mcp` **0.1.3**, and `vantio-agent-sdk` **3.1.3**. The previous versions are live from `vantioai/vantio-open-core`, not from this repository: `@vantio/cli` 0.3.26, `vantio-agent-sdk` 3.1.2, `@vantio/agent-sdk` 0.2.4, and `@vantio/optics-mcp` 0.1.2. The install commands above pin the 2026-10-21 registry check. Use those pins for a published install. Build from this tree only when you mean to run this source.
+This tree's versions are the first release numbers from this repository: `@vantio/cli` **0.3.27**, `@vantio/agent-sdk` **0.2.5**, `@vantio/optics-mcp` **0.1.3**, and `vantio-agent-sdk` **3.1.3**. The previous versions are live from `vantioai/vantio-open-core`, not from this repository: `@vantio/cli` 0.3.26, `vantio-agent-sdk` 3.1.2, `@vantio/agent-sdk` 0.2.4, and `@vantio/optics-mcp` 0.1.2. The install commands above pin the 2026-10-26 registry check. Use those pins for a published install. Build from this tree only when you mean to run this source.
 
 ## Quick start
 
 ```bash
-npm install -g @vantio/cli@0.3.24
+npm install -g @vantio/cli@0.3.26
 vantio --version
 vantio run node agent.js
 vantio discover --local
@@ -36,7 +36,7 @@ vantio prove --format=md
 `vantio run` records supported Node calls (`node`, `npx`, `tsx`, `ts-node`) through the Node HTTP stack. It does not by itself record Python.
 
 ```bash
-pip install 'vantio-agent-sdk==3.1.1'
+pip install 'vantio-agent-sdk==3.1.2'
 vantio run python agent.py
 ```
 

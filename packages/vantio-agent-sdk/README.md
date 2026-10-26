@@ -5,10 +5,10 @@
 Optics does not block on its own. [Phantom Engine](https://github.com/vantioai/vantio-phantom-engine) enforces rules on the wrapped path and provides runtime protection on enrolled Linux — Observe, Enforce, and Control in one purchase.
 
 ```bash
-npm install @vantio/agent-sdk@0.2.5
+npm install @vantio/agent-sdk@0.2.4
 ```
 
-0.2.4 is the npm release checked on 2026-10-21. This directory is 0.2.5, the first release number from this repository.
+0.2.4 is the live npm release. This directory is 0.2.5 (source in this commit, not yet published).
 
 ## Quick start
 

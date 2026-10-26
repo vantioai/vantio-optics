@@ -43,7 +43,7 @@ python -c 'import vantio; print(vantio.__version__)'
 
 The printed version on a fresh PyPI install is `3.1.1`. If you are working from this git tree, `vantio.__version__` is `3.1.3`. Those are different files for `vantio/_http_observe.py`. Telemetry in the 3.1.1 wheel matches this tree: off unless `VANTIO_TELEMETRY=1`. Read [PYTHON-GUIDE.md](PYTHON-GUIDE.md) before you describe HTTP outcomes.
 
-Pin `==3.1.1` for the current published package. An unpinned `pip install vantio-agent-sdk` resolved to 3.1.1 on the registry check for this manual. It will follow PyPI whenever a later release is published. `vantio-agent-sdk==3.0.14` remains available if you pin that older release.
+Pin `==3.1.2` for the current published package. An unpinned `pip install vantio-agent-sdk` resolved to 3.1.1 on the registry check for this manual. It will follow PyPI whenever a later release is published. `vantio-agent-sdk==3.0.14` remains available if you pin that older release.
 
 ## Node SDK
 
@@ -56,7 +56,7 @@ Pin `==3.1.1` for the current published package. An unpinned `pip install vantio
 
 ```bash
 # Example status: illustrative. 0.2.4 is the 2026-10-21 registry pin.
-npm install @vantio/agent-sdk@0.2.5
+npm install @vantio/agent-sdk@0.2.4
 ```
 
 This package does not write `~/.vantio/runs`. Recording for Node is the CLI interceptor started by `vantio run`. Use the Node SDK only when you need its trace helper. Control-plane helpers in that package are outside free Optics and are not documented here.
@@ -72,7 +72,7 @@ This package does not write `~/.vantio/runs`. Recording for Node is the CLI inte
 
 ```bash
 # Example status: illustrative. 0.1.2 is the 2026-10-21 registry pin.
-npx -y @vantio/optics-mcp@0.1.3
+npx -y @vantio/optics-mcp@0.1.2
 ```
 
 The npm description text still contains an older product phrase. This manual's name for the product is Vantio Optics. Tools in the 0.1.3 server include `optics_list_runs`, `optics_get_run`, `optics_prove`, `optics_discover_local`, `optics_explain`, and `optics_upgrade_path`. The upgrade tool points at Phantom Engine. This manual does not reproduce Phantom Engine setup.

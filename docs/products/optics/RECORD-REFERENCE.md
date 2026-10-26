@@ -9,7 +9,7 @@ Optics keeps one JSON object per trace id. The shape is `unstable-pre-1.0`. Node
 | Node interceptor | `$VANTIO_HOME/runs` if `VANTIO_HOME` is set, otherwise `~/.vantio/runs` |
 | Python SDK | Same rule: `VANTIO_HOME` or `~/.vantio`, then `runs` |
 | CLI reader (`prove`, `search`, `tail`, `diff`, `discover`, `status`) | `~/.vantio/runs` only. `VANTIO_HOME` is ignored. |
-| `@vantio/optics-mcp@0.1.3` | Honors `VANTIO_HOME`, otherwise `~/.vantio/runs` |
+| `@vantio/optics-mcp` (source in this commit is 0.1.3, not yet published) | Honors `VANTIO_HOME`, otherwise `~/.vantio/runs` |
 
 File name: the trace id, characters outside `[A-Za-z0-9_-]` replaced with `_`, truncated to 80 characters, plus `.json`. Writing the same trace id again replaces the file.
 
