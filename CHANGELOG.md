@@ -1,6 +1,6 @@
 # Changelog
 
-This file starts at the versions the public registries served on 2026-10-21. It does not restate earlier releases. A heading under "Current registry releases" is a package that was already on npm or PyPI. A heading under "In this tree, not on a registry" is source in this repository and is not a release.
+This file starts at the versions the public registries served on 2026-10-21. It does not restate earlier releases. A heading under "Current registry releases" is a package version that was already on npm or PyPI at that check. Registry check on 2026-10-26: `@vantio/cli` latest is 0.3.26 and `vantio-agent-sdk` latest is 3.1.2, both published from `vantioai/vantio-open-core`, not from this repository.
 
 Merging a pull request does not publish.
 
@@ -10,7 +10,7 @@ Merging a pull request does not publish.
 
 npm release. The registry `time.modified` value checked on 2026-10-21 was `2026-09-26T04:49:18.489Z`. License MIT. Node.js `>=18.3.0`.
 
-The tarball metadata has registry signatures and no provenance attestation. This repository does not keep a separate changelog file beside the CLI. Do not treat the 0.3.26 source in `packages/vantio-cli` as the npm package. `npm install -g @vantio/cli` installs 0.3.24.
+The tarball metadata has registry signatures and no provenance attestation. This repository does not keep a separate changelog file beside the CLI. npm latest on 2026-10-26 is 0.3.26, published from `vantioai/vantio-open-core`, not from this repository. That release also has registry signatures and no provenance attestation.
 
 ### `@vantio/agent-sdk` 0.2.4
 
@@ -32,17 +32,17 @@ The package changelog in this tree records 3.1.1 as a publication of the 3.1.0 b
 - A run log written by the wheel sets `vantio_run_log` to `"1"`, `schema_version` to `2`, `schema_status` to `unstable-pre-1.0`, and `workflow` to `sight_loop`.
 - `vantio/_http_observe.py` does not match this tree. This tree is 3.1.2 and that file is larger.
 
-`vantio-agent-sdk==3.0.14` is still on PyPI. It is not the latest release. Pin `==3.1.1` for the current one.
+`vantio-agent-sdk==3.0.14` is still on PyPI. It is not the latest release. Pin `==3.1.2` for the current one. 3.1.2 was uploaded from `vantioai/vantio-open-core`, not from this repository.
 
-## In this tree, not on a registry
+## Same version in this tree
 
 ### `@vantio/cli` 0.3.26
 
-`packages/vantio-cli/package.json`. Not the npm release.
+`packages/vantio-cli/package.json`. On npm as 0.3.26. Published from `vantioai/vantio-open-core`, not from this repository.
 
 ### `vantio-agent-sdk` 3.1.2
 
-`packages/vantio-agent-sdk-py`. Not the PyPI release. The package changelog says a recorded call can append a live event and flag a first connection to a destination that is not on the allowlist. That heading does not upload a wheel or sdist.
+`packages/vantio-agent-sdk-py`. On PyPI as 3.1.2. Uploaded from `vantioai/vantio-open-core`, not from this repository. The package changelog says a recorded call can append a live event and flag a first connection to a destination that is not on the allowlist. That heading does not upload a wheel or sdist.
 
 ### Editor extension 0.1.0
 
