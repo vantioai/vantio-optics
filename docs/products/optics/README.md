@@ -10,14 +10,14 @@ Enforcement is Phantom Engine. This manual does not document Phantom Engine inst
 
 Checked against the public registries on 2026-10-21.
 
-| Package | What a fresh install returns | What this source tree contains |
+| Package | Release this manual describes (checked 2026-10-21) | What this source tree contains |
 | --- | --- | --- |
-| `@vantio/cli` (npm) | **0.3.24** | **0.3.26**. `npm install -g @vantio/cli` installs 0.3.24. |
-| `vantio-agent-sdk` (PyPI) | **3.1.1** | **3.1.2**. `pip install vantio-agent-sdk` installs 3.1.1. |
-| `@vantio/agent-sdk` (npm) | **0.2.4** | **0.2.4**. This package does not write `~/.vantio/runs`. |
-| `@vantio/optics-mcp` (npm) | **0.1.2** | **0.1.2**. Read-only local log reader. |
+| `@vantio/cli` (npm) | **0.3.24** | **0.3.27**. `npm install -g @vantio/cli` installed 0.3.24 at the 2026-10-21 18:19 UTC check; npm latest is now 0.3.26 (from vantio-open-core). |
+| `vantio-agent-sdk` (PyPI) | **3.1.1** | **3.1.3**. `pip install vantio-agent-sdk` installed 3.1.1 at the 2026-10-21 18:19 UTC check; PyPI latest is now 3.1.2 (from vantio-open-core). |
+| `@vantio/agent-sdk` (npm) | **0.2.4** | **0.2.5**. This package does not write `~/.vantio/runs`. |
+| `@vantio/optics-mcp` (npm) | **0.1.2** | **0.1.3**. Read-only local log reader. |
 
-Published CLI behavior below is 0.3.24 unless a sentence names this source tree. Published Python behavior for an unpinned install is 3.1.1. Pages that name Python 3.0.14 describe that older release, which is still on PyPI if you pin it. They are not what `pip install vantio-agent-sdk` returns. The 3.1.1 wheel's telemetry module matches this tree. `vantio/_http_observe.py` in this tree does not match that wheel.
+Published CLI behavior below is 0.3.24, the release this manual was checked against; npm latest is now 0.3.26. Published Python behavior below is 3.1.1; PyPI latest is now 3.1.2. Pages that name Python 3.0.14 describe that older release, which is still on PyPI if you pin it. They are not what `pip install vantio-agent-sdk` returns. The 3.1.1 wheel's telemetry module matches this tree. `vantio/_http_observe.py` in this tree does not match that wheel.
 
 An earlier pass of this manual, dated 2026-09-27, recorded Python 3.0.14 as the PyPI release. That is no longer the latest release.
 

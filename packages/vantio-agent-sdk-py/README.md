@@ -2,15 +2,15 @@
 
 **Vantio** is the infrastructure control layer for autonomous AI. This package is **Vantio Optics** Observe for Python: record where the agent calls LLM APIs (host, size, process, trace) without storing prompts or completions. Optics is free. Optics does not block, redact, or cap spend on its own.
 
-Optics helps you see. [Phantom Engine](https://vantio.ai/phantom) is runtime protection on enrolled Linux — Observe, Enforce, and Control in one purchase. Contact Vantio. [Enterprise](https://vantio.ai/enterprise) adds governance when you need proof and process on top. Contact Vantio. Continuous Assurance is how the suite stays true after install; it is not a separate product.
+Optics helps you see. [Phantom Engine](https://vantio.ai/phantom) is runtime protection on enrolled Linux — Observe, Enforce, and Control in one purchase, self-serve at https://vantio.ai/pricing. [Enterprise](https://vantio.ai/enterprise) adds governance when you need proof and process on top. Contact Vantio. Continuous Assurance is how the suite stays true after install; it is not a separate product.
 
-> **Optics** (Free) · **Phantom Engine** (Contact Vantio) · **Enterprise** (Contact Vantio)
+> **Optics** (Free) · **Phantom Engine** (self-serve, per server) · **Enterprise** (Contact Vantio)
 
 ```bash
 pip install 'vantio-agent-sdk==3.1.1'
 ```
 
-3.1.1 is the PyPI release checked on 2026-10-21. This directory's `pyproject.toml` is 3.1.2.
+3.1.1 is the PyPI release checked on 2026-10-21. This directory's `pyproject.toml` is 3.1.3.
 
 Prefixing `vantio run python` without this SDK does not intercept. Python support requires `vantio-agent-sdk`. Follow the current Python SDK example and verify that a supported outbound event appears before relying on the coverage state.
 

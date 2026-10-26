@@ -30,7 +30,7 @@ pnpm test
 node bin/vantio-optics-mcp.js   # stdio MCP
 ```
 
-Or: `npx -y @vantio/optics-mcp@0.1.2` (npm latest on 2026-10-21).
+Or: `npx -y @vantio/optics-mcp@0.1.2`. Source in this commit is 0.1.3 (not yet published). npm latest checked 2026-10-26: 0.1.2.
 
 ## Cursor / Claude Desktop
 

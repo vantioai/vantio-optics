@@ -8,6 +8,8 @@ Optics does not block on its own. [Phantom Engine](https://github.com/vantioai/v
 npm install @vantio/agent-sdk@0.2.4
 ```
 
+0.2.4 is the live npm release. This directory is 0.2.5 (source in this commit, not yet published).
+
 ## Quick start
 
 ```ts

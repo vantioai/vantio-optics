@@ -4,20 +4,20 @@ This repository does not publish when a pull request merges. `.github/workflows/
 
 ## Freeze while open-core publishes
 
-Until the npm and PyPI trusted publishers point at this repository, `vantioai/vantio-open-core` is the publishing source. It publishes `@vantio/cli` 0.3.26 and `vantio-agent-sdk` 3.1.2 from sealed bytes. The `package.json` and `pyproject.toml` links here name this repository, so a pack from this tree does not match those sealed bytes. Do not publish those versions from here.
+Until the npm and PyPI trusted publishers point at this repository, `vantioai/vantio-open-core` is the publishing source. It publishes `@vantio/cli` 0.3.26 and `vantio-agent-sdk` 3.1.2 from sealed bytes. Those versions, plus `@vantio/agent-sdk` 0.2.4 and `@vantio/optics-mcp` 0.1.2, are live from open-core, not from this repository. The `package.json` and `pyproject.toml` links here name this repository, so a pack from this tree does not match those sealed bytes. Do not publish those versions from here. This tree is now `@vantio/cli` 0.3.27, `@vantio/agent-sdk` 0.2.5, `@vantio/optics-mcp` 0.1.3, and `vantio-agent-sdk` 3.1.3. Those are the first release numbers from this repository.
 
 During the freeze, package code in `packages/` and `extensions/vantio-optics` stays byte-identical to open-core `main`. Make a code change in both repositories in the same change window. The `Open-core drift` workflow (`scripts/check_open_core_drift.py`) fails on any other difference. READMEs, changelogs, tests, and repository links may differ.
 
-The freeze ends when the first release after 0.3.26 and 3.1.2 is cut from this repository, the trusted publishers are switched as described below, and the package directories are removed from open-core. Remove the drift workflow in that same change.
+The freeze ends when the first releases from this repository (`@vantio/cli` 0.3.27, `@vantio/agent-sdk` 0.2.5, `@vantio/optics-mcp` 0.1.3, and `vantio-agent-sdk` 3.1.3) are cut, the trusted publishers are switched as described below, and the package directories are removed from open-core. Remove the drift workflow in that same change.
 
 Registry check on 2026-10-21:
 
 | Package | Registry | Latest | This tree |
 | --- | --- | --- | --- |
-| `@vantio/cli` | npm | 0.3.24 | 0.3.26 |
-| `@vantio/agent-sdk` | npm | 0.2.4 | 0.2.4 |
-| `@vantio/optics-mcp` | npm | 0.1.2 | 0.1.2 |
-| `vantio-agent-sdk` | PyPI | 3.1.1 | 3.1.2 |
+| `@vantio/cli` | npm | 0.3.24 | 0.3.27 |
+| `@vantio/agent-sdk` | npm | 0.2.4 | 0.2.5 |
+| `@vantio/optics-mcp` | npm | 0.1.2 | 0.1.3 |
+| `vantio-agent-sdk` | PyPI | 3.1.1 | 3.1.3 |
 
 npm and PyPI reject a second upload of a version that already exists. A later publish from this tree is a new version, not a copy of 0.3.24 or 3.1.1.
 
@@ -54,7 +54,7 @@ Do this once per package: `@vantio/cli`, `@vantio/agent-sdk`, and `@vantio/optic
 8. Node.js must be `>=22.14.0` and the npm CLI must be `>=11.5.1`. Provenance is attached automatically for a public package published from a public repository. Do not set `provenance` to false.
 9. Each package's `repository.url` must be `git+https://github.com/vantioai/vantio-optics.git`. That value is already set in this tree. Publish from the package directory so the monorepo `directory` field stays accurate.
 10. A new trusted publisher must complete a successful publish within 2 days or the configuration expires. After it works, revoke leftover automation tokens you no longer need (npm package settings, Publishing access, "Require two-factor authentication and disallow tokens" is the token lockdown; trusted publishers keep working).
-11. Only then delete the `publishing-disabled` job, remove `needs: publishing-disabled`, and remove `if: false` from `publish-npm`. Dispatch for a version that is not already on npm. `@vantio/cli` 0.3.26 is a new release. `@vantio/agent-sdk` 0.2.4 and `@vantio/optics-mcp` 0.1.2 are already on npm, so publishing them again fails until their versions change. Do not dispatch from this pull request.
+11. Only then delete the `publishing-disabled` job, remove `needs: publishing-disabled`, and remove `if: false` from `publish-npm`. Dispatch for a version that is not already on npm. The first npm releases from this repository are `@vantio/cli` 0.3.27, `@vantio/agent-sdk` 0.2.5, and `@vantio/optics-mcp` 0.1.3. `@vantio/cli` 0.3.26, `@vantio/agent-sdk` 0.2.4, and `@vantio/optics-mcp` 0.1.2 are already on npm (0.3.26 is live from `vantioai/vantio-open-core`), so publishing those again fails. Do not dispatch from this pull request.
 
 `workflow_dispatch` validation uses the workflow file that was triggered. Keep the publish command in `publish.yml` itself. Do not hide `npm publish` behind a reusable workflow with a different filename.
 
@@ -70,7 +70,7 @@ Project: `vantio-agent-sdk`. Docs: https://docs.pypi.org/trusted-publishers/
    - Environment name: `pypi`
 3. The workflow job must set `permissions: id-token: write`, `environment: pypi`, and use `pypa/gh-action-pypi-publish` with no password and no token. The disabled job in `publish.yml` is that shape.
 4. After a publish from this repository succeeds, remove the publisher that names `vantioai/vantio-open-core` and workflow `pypi-publish.yml`. Until you remove it, open-core can still match its own workflow.
-5. Do not republish 3.1.1. The next PyPI upload from this tree is a new version. The tree's current version is 3.1.2. Confirm that version is the one you mean before you delete `publishing-disabled`, remove `needs: publishing-disabled`, and remove `if: false` from `publish-pypi`.
+5. Do not republish 3.1.1 or 3.1.2. 3.1.2 is live from `vantioai/vantio-open-core`. The next PyPI upload from this tree is a new version. The tree's current version is 3.1.3, the first PyPI release number from this repository. Confirm that version is the one you mean before you delete `publishing-disabled`, remove `needs: publishing-disabled`, and remove `if: false` from `publish-pypi`.
 6. Do not dispatch the workflow from this pull request. Do not create a tag as part of turning the publisher around.
 
 ## What stays disabled until those steps are done
