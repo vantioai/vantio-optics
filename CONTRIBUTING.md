@@ -4,10 +4,10 @@ Vantio Optics is Linux security for AI: see what AI is doing on your Linux syste
 
 | Path | Package |
 | --- | --- |
-| `packages/vantio-cli` | `@vantio/cli` on npm. Published version on 2026-10-21: `0.3.24`. This tree: `0.3.26`. |
-| `packages/vantio-agent-sdk-py` | `vantio-agent-sdk` on PyPI. Published version on 2026-10-21: `3.1.1`. This tree: `3.1.2`. |
-| `packages/vantio-agent-sdk` | `@vantio/agent-sdk` on npm, `0.2.4`. |
-| `packages/vantio-optics-mcp` | `@vantio/optics-mcp` on npm, `0.1.2`. |
+| `packages/vantio-cli` | `@vantio/cli` on npm. Published version on 2026-10-21: `0.3.24`. This tree: `0.3.27`. |
+| `packages/vantio-agent-sdk-py` | `vantio-agent-sdk` on PyPI. Published version on 2026-10-21: `3.1.1`. This tree: `3.1.3`. |
+| `packages/vantio-agent-sdk` | `@vantio/agent-sdk` on npm. Published version on 2026-10-21: `0.2.4`. This tree: `0.2.5`. |
+| `packages/vantio-optics-mcp` | `@vantio/optics-mcp` on npm. Published version on 2026-10-21: `0.1.2`. This tree: `0.1.3`. |
 | `extensions/vantio-optics` | Editor extension. Not an npm package. |
 
 Phantom Engine stays outside this repository. Do not add enforcement, kernel code, or lab material here. Product page: https://vantio.ai/phantom-engine.

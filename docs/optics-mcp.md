@@ -30,7 +30,7 @@ pnpm test
 node bin/vantio-optics-mcp.js   # stdio MCP
 ```
 
-Or: `npx -y @vantio/optics-mcp@0.1.2` (npm latest on 2026-10-21).
+Or: `npx -y @vantio/optics-mcp@0.1.3` (this tree). npm latest on 2026-10-21 was 0.1.2.
 
 ## Cursor / Claude Desktop
 
@@ -39,7 +39,7 @@ Or: `npx -y @vantio/optics-mcp@0.1.2` (npm latest on 2026-10-21).
   "mcpServers": {
     "vantio-optics": {
       "command": "npx",
-      "args": ["-y", "@vantio/optics-mcp@0.1.2"]
+      "args": ["-y", "@vantio/optics-mcp@0.1.3"]
     }
   }
 }

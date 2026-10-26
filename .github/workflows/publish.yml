@@ -3,7 +3,7 @@ name: Publish
 # Manual only. Pull requests and pushes do not run this file.
 # Publish jobs are disabled with `if: false` and are not dispatched by this change.
 # See docs/publishing.md before anyone removes those guards.
-# npm and PyPI versions are permanent: a published version cannot be reused, and npm unpublish/PyPI delete do not free the number. Get Zach's go on exact versions first.
+# npm and PyPI versions are permanent: a published version cannot be reused, and npm unpublish/PyPI delete do not free the number. Get the repository owner's go on exact versions first.
 
 on:
   workflow_dispatch:

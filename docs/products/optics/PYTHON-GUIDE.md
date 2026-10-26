@@ -1,17 +1,17 @@
 # Python guide
 
-Registry check: 2026-10-21. The unpinned install is 3.1.1. This git tree is 3.1.2.
+Registry check: 2026-10-21. The unpinned install is 3.1.1. This git tree is 3.1.3.
 
 | | Published install | This git tree |
 | --- | --- | --- |
 | Package | `vantio-agent-sdk` | `vantio-agent-sdk` |
-| Version | **3.1.1** | **3.1.2**, not on PyPI |
-| `pip install vantio-agent-sdk` | Installs 3.1.1 | Does not install 3.1.2 |
+| Version | **3.1.1** | **3.1.3**, not on PyPI |
+| `pip install vantio-agent-sdk` | Installs 3.1.1 | Does not install 3.1.3 |
 | Telemetry gate | Off unless `VANTIO_TELEMETRY=1`. The wheel's `vantio/_telemetry.py` matches this tree. | Same file |
 | `schema_status` on the run file | `unstable-pre-1.0` in the 3.1.1 wheel | `unstable-pre-1.0` |
-| `vantio/_http_observe.py` | The 3.1.1 wheel | Larger than the 3.1.1 wheel. Do not describe 3.1.2 as the published package. |
+| `vantio/_http_observe.py` | The 3.1.1 wheel | Larger than the 3.1.1 wheel. Do not describe 3.1.3 as the published package. |
 
-`vantio-agent-sdk==3.0.14` is an older release. Its telemetry and HTTP notes stay in [shield() on 3.0.14](#shield-on-3014). CLI `@vantio/cli@0.3.24` is the published reader. This tree's CLI is 0.3.26. Display rules are in [STATUS-AND-OUTCOMES.md](STATUS-AND-OUTCOMES.md).
+`vantio-agent-sdk==3.0.14` is an older release. Its telemetry and HTTP notes stay in [shield() on 3.0.14](#shield-on-3014). CLI `@vantio/cli@0.3.24` is the published reader. This tree's CLI is 0.3.27. Display rules are in [STATUS-AND-OUTCOMES.md](STATUS-AND-OUTCOMES.md).
 
 ## Install the published SDK
 
@@ -86,9 +86,9 @@ A local check of the published 3.0.14 wheel, using `urllib.request.urlopen` agai
 
 ## Published 3.1.1, from the 3.1.0 record
 
-`pip install vantio-agent-sdk` on 2026-10-21 installs 3.1.1. The package changelog records 3.1.1 as no SDK behavior change from 3.1.0. The 3.1.1 wheel writes `vantio_run_log` `"1"`, `schema_version` 2, `schema_status` `unstable-pre-1.0`, and `workflow` `sight_loop`. Its telemetry, outcome, process-wrap, and `sdk.py` modules match this tree. Its HTTP observe module does not match 3.1.2.
+`pip install vantio-agent-sdk` on 2026-10-21 installs 3.1.1. The package changelog records 3.1.1 as no SDK behavior change from 3.1.0. The 3.1.1 wheel writes `vantio_run_log` `"1"`, `schema_version` 2, `schema_status` `unstable-pre-1.0`, and `workflow` `sight_loop`. Its telemetry, outcome, process-wrap, and `sdk.py` modules match this tree. Its HTTP observe module does not match 3.1.3.
 
-The bullets below are the 3.1.0 record. They are not a line-by-line description of the larger 3.1.2 file. The 3.1.2 changelog adds a live destination record. That addition is source, not the 3.1.1 wheel.
+The bullets below are the 3.1.0 record. They are not a line-by-line description of the larger 3.1.3 file. The 3.1.2 changelog adds a live destination record. That addition is source, not the 3.1.1 wheel.
 
 In the 3.1.0 record published as 3.1.1:
 

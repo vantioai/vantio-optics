@@ -12,10 +12,10 @@ Checked against the public registries on 2026-10-21.
 
 | Package | What a fresh install returns | What this source tree contains |
 | --- | --- | --- |
-| `@vantio/cli` (npm) | **0.3.24** | **0.3.26**. `npm install -g @vantio/cli` installs 0.3.24. |
-| `vantio-agent-sdk` (PyPI) | **3.1.1** | **3.1.2**. `pip install vantio-agent-sdk` installs 3.1.1. |
-| `@vantio/agent-sdk` (npm) | **0.2.4** | **0.2.4**. This package does not write `~/.vantio/runs`. |
-| `@vantio/optics-mcp` (npm) | **0.1.2** | **0.1.2**. Read-only local log reader. |
+| `@vantio/cli` (npm) | **0.3.24** | **0.3.27**. `npm install -g @vantio/cli` installs 0.3.24. |
+| `vantio-agent-sdk` (PyPI) | **3.1.1** | **3.1.3**. `pip install vantio-agent-sdk` installs 3.1.1. |
+| `@vantio/agent-sdk` (npm) | **0.2.4** | **0.2.5**. This package does not write `~/.vantio/runs`. |
+| `@vantio/optics-mcp` (npm) | **0.1.2** | **0.1.3**. Read-only local log reader. |
 
 Published CLI behavior below is 0.3.24 unless a sentence names this source tree. Published Python behavior for an unpinned install is 3.1.1. Pages that name Python 3.0.14 describe that older release, which is still on PyPI if you pin it. They are not what `pip install vantio-agent-sdk` returns. The 3.1.1 wheel's telemetry module matches this tree. `vantio/_http_observe.py` in this tree does not match that wheel.
 

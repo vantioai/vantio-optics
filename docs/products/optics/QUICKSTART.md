@@ -2,7 +2,7 @@
 
 Optics is local. A fresh CLI install needs no account and no API key. The record is metadata: host, size, timing, and process. Prompts and completions are absent from the record.
 
-Versions, checked on 2026-10-21: install `@vantio/cli@0.3.24` and, for Python, `vantio-agent-sdk==3.1.1`. This git tree is CLI 0.3.26 and Python 3.1.2. Details: [INSTALLATION.md](INSTALLATION.md).
+Versions, checked on 2026-10-21: install `@vantio/cli@0.3.24` and, for Python, `vantio-agent-sdk==3.1.1`. This git tree is CLI 0.3.27 and Python 3.1.3. Details: [INSTALLATION.md](INSTALLATION.md).
 
 ## 1. Install the CLI
 

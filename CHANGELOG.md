@@ -36,13 +36,21 @@ The package changelog in this tree records 3.1.1 as a publication of the 3.1.0 b
 
 ## In this tree, not on a registry
 
-### `@vantio/cli` 0.3.26
+### `@vantio/cli` 0.3.27
 
-`packages/vantio-cli/package.json`. Not the npm release.
+`packages/vantio-cli/package.json`. First release number from this repository. 0.3.26 is live from `vantioai/vantio-open-core`.
 
-### `vantio-agent-sdk` 3.1.2
+### `@vantio/agent-sdk` 0.2.5
 
-`packages/vantio-agent-sdk-py`. Not the PyPI release. The package changelog says a recorded call can append a live event and flag a first connection to a destination that is not on the allowlist. That heading does not upload a wheel or sdist.
+`packages/vantio-agent-sdk/package.json`. First release number from this repository. 0.2.4 is on npm.
+
+### `@vantio/optics-mcp` 0.1.3
+
+`packages/vantio-optics-mcp/package.json`. First release number from this repository. 0.1.2 is on npm.
+
+### `vantio-agent-sdk` 3.1.3
+
+`packages/vantio-agent-sdk-py`. First release number from this repository. 3.1.2 is live from `vantioai/vantio-open-core`. The 3.1.2 package changelog says a recorded call can append a live event and flag a first connection to a destination that is not on the allowlist. That heading does not upload a wheel or sdist.
 
 ### Editor extension 0.1.0
 

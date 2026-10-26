@@ -27,7 +27,7 @@ Optics must have local run logs under `~/.vantio/runs` (from `vantio run`, SDK `
 - **Marketplace:** search `Vantio Optics` (`vantioai.vantio-optics`) once published
 - **VSIX:** `code --install-extension vantio-optics-0.1.0.vsix`
 
-For Cursor, prefer the [Cursor / Open plugin](https://github.com/vantioai/vantio-optics-cursor-plugin) and `@vantio/optics-mcp@0.1.2`.
+For Cursor, prefer the [Cursor / Open plugin](https://github.com/vantioai/vantio-optics-cursor-plugin) and `@vantio/optics-mcp@0.1.3`.
 
 ## Links
 

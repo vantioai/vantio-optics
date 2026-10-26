@@ -4,7 +4,7 @@
 
 See what AI on your Linux systems is calling: Optics records destination, process, size, and timing for supported calls in processes you start through Optics.
 
-Optics records destination, process, size, and timing for supported calls. Prompts and completions are not stored. Optics does not block, redact, or enforce. When you need enforcement on Linux systems you enroll, pair Optics with [Phantom Engine](https://vantio.ai/phantom-engine).
+Prompts and completions are not stored. Optics does not block, redact, or enforce. When you need enforcement on Linux systems you enroll, pair Optics with [Phantom Engine](https://vantio.ai/phantom-engine).
 
 Free Optics needs no account and no API key.
 
@@ -21,7 +21,7 @@ These versions are what the public registries returned on 2026-10-21. Pin them. 
 
 `@vantio/cli` needs Node.js `>=18.3.0`. `vantio-agent-sdk` needs Python `>=3.10`. There is no installer at `https://vantio.ai/install.sh`.
 
-This git tree is ahead of the registries in two places: `@vantio/cli` here is **0.3.26**, and `vantio-agent-sdk` here is **3.1.2**. Those are not the packages the commands above install. Use the registry pins for a published install. Build from this tree only when you mean to run this source.
+This tree's versions are the first release numbers from this repository: `@vantio/cli` **0.3.27**, `@vantio/agent-sdk` **0.2.5**, `@vantio/optics-mcp` **0.1.3**, and `vantio-agent-sdk` **3.1.3**. The previous versions are live from `vantioai/vantio-open-core`, not from this repository: `@vantio/cli` 0.3.26, `vantio-agent-sdk` 3.1.2, `@vantio/agent-sdk` 0.2.4, and `@vantio/optics-mcp` 0.1.2. The install commands above pin the 2026-10-21 registry check. Use those pins for a published install. Build from this tree only when you mean to run this source.
 
 ## Quick start
 

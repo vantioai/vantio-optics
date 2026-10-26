@@ -90,4 +90,4 @@ Intercepted calls can print to the terminal while the process runs. The run file
 
 ## Node SDK
 
-`@vantio/agent-sdk@0.2.4` does not write the run log. `vantio run` does. Do not expect `shield()` from the Node SDK, used alone, to create `~/.vantio/runs`.
+`@vantio/agent-sdk@0.2.5` does not write the run log. `vantio run` does. Do not expect `shield()` from the Node SDK, used alone, to create `~/.vantio/runs`.

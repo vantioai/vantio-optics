@@ -12,7 +12,7 @@
 npm install -g @vantio/cli@0.3.24
 ```
 
-0.3.24 is the npm release checked on 2026-10-21. This directory's `package.json` is 0.3.26. There is no curl installer at `https://vantio.ai/install.sh`. [vantio.ai/install](https://vantio.ai/install) goes to the install docs. Python support requires `vantio-agent-sdk`. Follow the current Python SDK example and verify that a supported outbound event appears before relying on the coverage state.
+0.3.24 is the npm release checked on 2026-10-21. This directory's `package.json` is 0.3.27. There is no curl installer at `https://vantio.ai/install.sh`. [vantio.ai/install](https://vantio.ai/install) goes to the install docs. Python support requires `vantio-agent-sdk`. Follow the current Python SDK example and verify that a supported outbound event appears before relying on the coverage state.
 
 ---
 
@@ -331,7 +331,7 @@ Browser paths stay outside this wrap.
 For explicit trace correlation across async hops, use the SDK alongside the CLI:
 
 ```bash
-npm install @vantio/agent-sdk@0.2.4
+npm install @vantio/agent-sdk@0.2.5
 ```
 
 ```ts

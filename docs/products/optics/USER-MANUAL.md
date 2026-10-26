@@ -6,7 +6,7 @@ Optics is free, local-first observability for supported AI traffic. It records t
 
 Optics observes. Phantom Engine is the separate product that enforces. This manual stops at Optics.
 
-The installable versions on 2026-10-21 are `@vantio/cli@0.3.24` and `vantio-agent-sdk==3.1.1`. This source tree is CLI 0.3.26 and Python 3.1.2. See [VERSION-METADATA.json](VERSION-METADATA.json).
+The installable versions on 2026-10-21 are `@vantio/cli@0.3.24` and `vantio-agent-sdk==3.1.1`. This source tree is CLI 0.3.27 and Python 3.1.3. See [VERSION-METADATA.json](VERSION-METADATA.json).
 
 ## Who this is for
 
@@ -104,7 +104,7 @@ CLI 0.3.24 does not send the ping unless `VANTIO_TELEMETRY=1`. Published Python 
 
 ## Read-only MCP
 
-`@vantio/optics-mcp@0.1.2` lists and renders local logs over the Model Context Protocol. It does not block or redact. Its tools are `optics_list_runs`, `optics_get_run`, `optics_prove`, `optics_discover_local`, `optics_explain`, and `optics_upgrade_path`. The last tool points at Phantom Engine. This manual does not document Phantom Engine.
+`@vantio/optics-mcp@0.1.3` lists and renders local logs over the Model Context Protocol. It does not block or redact. Its tools are `optics_list_runs`, `optics_get_run`, `optics_prove`, `optics_discover_local`, `optics_explain`, and `optics_upgrade_path`. The last tool points at Phantom Engine. This manual does not document Phantom Engine.
 
 The MCP reader follows `VANTIO_HOME`. `vantio discover`, `search`, `tail`, `diff`, and `prove` read `~/.vantio` only. `vantio coverage`, `vantio destinations`, and `vantio export` read both, and they keep the allowlist and seen-destination file under `VANTIO_HOME` when that variable is set.
 
