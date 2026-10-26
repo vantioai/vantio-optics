@@ -1,8 +1,8 @@
 # Vantio Optics
 
-**Linux security for AI.**
+**Local observability for AI on Linux.**
 
-See what AI is doing on your Linux systems. That includes your own AI acting on its own or in swarms, and outside AI with malicious intent coming in.
+See what AI on your Linux systems is calling: Optics records destination, process, size, and timing for supported calls in processes you start through Optics.
 
 Optics records destination, process, size, and timing for supported calls. Prompts and completions are not stored. Optics does not block, redact, or enforce. When you need enforcement on Linux systems you enroll, pair Optics with [Phantom Engine](https://vantio.ai/phantom-engine).
 

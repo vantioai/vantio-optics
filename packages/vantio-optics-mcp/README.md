@@ -65,7 +65,7 @@ Local checkout:
 ## Upgrade path
 
 1. **Optics** (free, this MCP) — observe only
-2. **Phantom Engine** (Contact Vantio) — Observe, Enforce, and Control in one purchase
+2. **Phantom Engine** (self-serve, per server: https://vantio.ai/pricing) — Observe, Enforce, and Control in one purchase
 3. **Enterprise** (Contact Vantio) — governance add-on
 
 https://vantio.ai/pricing

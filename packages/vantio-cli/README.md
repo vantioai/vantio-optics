@@ -2,9 +2,9 @@
 
 [![npm](https://img.shields.io/npm/v/@vantio/cli.svg)](https://www.npmjs.com/package/@vantio/cli)
 
-> **Vantio Optics | Free Observability for AI Agents**
+> **Vantio Optics | Free Observability for AI**
 >
-> Free, local-first observability for supported AI-agent traffic. Prompts and completions are never stored.
+> Free, local-first observability for supported AI traffic. Prompts and completions are never stored.
 >
 > The running version is `vantio --version`. Python support requires `vantio-agent-sdk`. Follow the current Python SDK example and verify that a supported outbound event appears before relying on the coverage state.
 

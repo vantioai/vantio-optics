@@ -1,0 +1,5 @@
+# Zach must name the owners team before this file is merged.
+# Replace REPLACE_WITH_OWNERS_TEAM with the actual GitHub team slug
+# (e.g. @vantioai/platform-owners) and confirm the team has write access
+# to this repository. A placeholder team name silently skips review enforcement.
+/.github/workflows/ @vantioai/REPLACE_WITH_OWNERS_TEAM
