@@ -1,0 +1,5 @@
+{
+  "name": "vantio-optics",
+  "user": "ubuntu",
+  "install": "bash .cursor/cloud-install.sh"
+}
