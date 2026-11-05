@@ -1,7 +1,7 @@
 # Optics setup follow-up evidence
 
 Branch: `cursor/optics-setup-followup-ac75`  
-Head SHA: `07fd67fd476a17934cbcf8e48a78e4dc3bf7a399`  
+Head SHA: `90b895ac7a031b9e8ea91f5e79315e9d15a0bbfc`  
 Base (main at start): `9925bf14a7d7666ef1ae7c86e779cab3f05b72f8`
 
 Environment: Cloud agent VM, Node `v22.23.4`, pnpm `11.13.0` via corepack, Python `3.12.3`.
