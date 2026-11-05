@@ -25,7 +25,7 @@ Read `docs/publishing.md` before editing `packages/` or `extensions/vantio-optic
 
 ## Commands
 
-Verified in this repository. The run log is [evidence/cloud-agent-standard.md](evidence/cloud-agent-standard.md).
+Verified in this repository. Record command results in the pull request description. Leave run logs out of the repository.
 
 Install JavaScript dependencies:
 
@@ -67,10 +67,14 @@ Build. CI runs this after the tests.
 pnpm build
 ```
 
-Secret scan. This repository has no secret-scan package and no secret-scan CI job. The command is a filename-only `git grep` plus a tracked-name check. It exits 0 when nothing matches. On a match it prints filenames and exits 1. It does not print matching lines.
+Secret scan. This repository has no secret-scan package and no secret-scan CI job. The command is a filename-only `git grep` plus a tracked-name check. It exits 0 when nothing matches. On a match it prints filenames and exits 1. It does not print matching lines. Two provider-key prefixes are assembled from adjacent quoted fragments so this file does not contain those prefixes as contiguous text.
 
 ```bash
-if git grep -lEI 'AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|npm_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|sk-ant-api|sk-proj-' -- . ':!pnpm-lock.yaml'; then
+ant='sk-ant-''api'
+proj='sk-''proj-'
+pattern='AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|npm_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----'
+pattern="${pattern}|${ant}|${proj}"
+if git grep -lEI "$pattern" -- . ':!pnpm-lock.yaml'; then
   echo "secret-scan: pattern matched" >&2
   exit 1
 fi
@@ -88,9 +92,9 @@ echo "secret-scan: no pattern matched"
 - One scope. The diff is small enough to review in one pass.
 - The pull request is a draft and stays a draft. Leave `main` unpushed. Leave the pull request unmerged.
 - Run the existing test commands in this file before adding tests.
-- Add tests for every change, including a negative case. Show the commands and results in the evidence file.
-- `evidence/<name>.md` records the commands, return codes, git shas, and a gap list of what only a lab host or a human can prove.
-- The secret-scan command exits 0.
+- Add tests for every change, including a negative case. Show the commands and results in the pull request description.
+- The pull request description records the commands, return codes, git shas, and a gap list of what only a lab host or a human can prove. Leave run logs out of the repository.
+- The secret-scan command exits 0 on this tree.
 - Keep secrets, keys, tokens, and customer data out of code, logs, prompts, and pull request text.
 - Skip live payments, tags, publishes, deploys, workflow dispatches, and cloud runs.
 - State only what a test or log from that run proves. List policy questions for owners.

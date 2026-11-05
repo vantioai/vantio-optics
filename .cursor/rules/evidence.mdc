@@ -5,11 +5,11 @@ alwaysApply: true
 
 # Evidence
 
-Write `evidence/<name>.md` for the change. Include:
+Record the run in the pull request description. Leave run logs out of the repository. Include:
 
 - The commands you ran
 - Each command's return code
 - The git shas you ran against
 - A gap list of what only a lab host or a human can prove
 
-Keep secrets, customer data, and tokens out of that file.
+Keep secrets, customer data, and tokens out of that description.
