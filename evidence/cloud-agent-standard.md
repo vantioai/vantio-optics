@@ -31,8 +31,8 @@ The two skipped Python tests printed `skipped 'pycurl is not installed'` and `sk
 
 ## Shas
 
-- `854d968e6f015e85bbd5c0fb1b75fe4613b0b5dc` — parent commit. Install, tests, typecheck, lint, build, and the secret scan of this worktree ran from that parent.
-- The commit that adds this file changes the hash. The pull request head sha is the hash of that commit on the branch, read with `git rev-parse HEAD` after the commit.
+- `854d968e6f015e85bbd5c0fb1b75fe4613b0b5dc` — parent commit. Install, tests, typecheck, lint, build, and the secret scan ran from that parent.
+- `362cb715aee5efa5534000c667f5d9718c80d635` — commit that added the guide, rules, and the first copy of this file. Recording that hash is a later commit. The pull request head is that later commit.
 
 ## Gap list
 
