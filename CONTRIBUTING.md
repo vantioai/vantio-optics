@@ -12,6 +12,10 @@ Vantio Optics is Linux security for AI: see what AI is doing on your Linux syste
 
 Phantom Engine stays outside this repository. Do not add enforcement, kernel code, or lab material here. Product page: https://vantio.ai/phantom-engine.
 
+## Cloud agents
+
+Cursor cloud agents follow [AGENTS.md](AGENTS.md) and `.cursor/rules/`. The review rules in this file stay as they are.
+
 ## Development
 
 pnpm is the package manager for the JavaScript workspace. The root `packageManager` field pins the version.

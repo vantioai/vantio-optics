@@ -1,0 +1,10 @@
+---
+description: Run existing tests first and cover each change
+alwaysApply: true
+---
+
+# Tests
+
+- Run the existing test commands in `AGENTS.md` before editing.
+- Add tests for every change, including a negative case.
+- Show the commands and the results in `evidence/<name>.md`.
