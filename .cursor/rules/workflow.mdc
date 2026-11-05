@@ -1,0 +1,10 @@
+---
+description: One scope per agent, and a draft pull request only
+alwaysApply: true
+---
+
+# Workflow
+
+- Take one scope. Keep the diff small enough to review in one pass.
+- Open one draft pull request and leave it draft.
+- Leave the pull request unmerged. Leave `main` unpushed.

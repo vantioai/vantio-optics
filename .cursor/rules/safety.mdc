@@ -1,0 +1,11 @@
+---
+description: Keep secrets, payments, publishes, and deploys out of agent work
+alwaysApply: true
+---
+
+# Safety
+
+- Keep secrets, keys, tokens, and customer data out of code, logs, prompts, and pull request text.
+- Skip live payments.
+- Skip tags, publishes, deploys, and cloud runs.
+- Leave `.github/workflows/publish.yml` undispatched. Its upload jobs stay disabled.
