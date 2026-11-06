@@ -10,23 +10,23 @@ Free Optics needs no account and no API key.
 
 ## Install
 
-These versions are what the public registries returned on 2026-10-21. Pin them. An unpinned install follows whatever the registry marks latest later.
+These versions are what the public registries returned on 2026-10-26. Pin them. An unpinned install follows whatever the registry marks latest later.
 
 | Package | Registry | Version | Install |
 | --- | --- | --- | --- |
-| `@vantio/cli` | npm | 0.3.24 | `npm install -g @vantio/cli@0.3.24` |
-| `vantio-agent-sdk` | PyPI | 3.1.1 | `pip install 'vantio-agent-sdk==3.1.1'` |
+| `@vantio/cli` | npm | 0.3.26 | `npm install -g @vantio/cli@0.3.26` |
+| `vantio-agent-sdk` | PyPI | 3.1.2 | `pip install 'vantio-agent-sdk==3.1.2'` |
 | `@vantio/agent-sdk` | npm | 0.2.4 | `npm install @vantio/agent-sdk@0.2.4` |
 | `@vantio/optics-mcp` | npm | 0.1.2 | `npx -y @vantio/optics-mcp@0.1.2` |
 
 `@vantio/cli` needs Node.js `>=18.3.0`. `vantio-agent-sdk` needs Python `>=3.10`. There is no installer at `https://vantio.ai/install.sh`.
 
-This git tree is ahead of the registries in two places: `@vantio/cli` here is **0.3.26**, and `vantio-agent-sdk` here is **3.1.2**. Those are not the packages the commands above install. Use the registry pins for a published install. Build from this tree only when you mean to run this source.
+This git tree matches those registry versions: `@vantio/cli` **0.3.26** and `vantio-agent-sdk` **3.1.2**. Those releases are live from `vantioai/vantio-open-core`, not from this repository. A later release from this repository needs a new version.
 
 ## Quick start
 
 ```bash
-npm install -g @vantio/cli@0.3.24
+npm install -g @vantio/cli@0.3.26
 vantio --version
 vantio run node agent.js
 vantio discover --local
@@ -36,7 +36,7 @@ vantio prove --format=md
 `vantio run` records supported Node calls (`node`, `npx`, `tsx`, `ts-node`) through the Node HTTP stack. It does not by itself record Python.
 
 ```bash
-pip install 'vantio-agent-sdk==3.1.1'
+pip install 'vantio-agent-sdk==3.1.2'
 vantio run python agent.py
 ```
 
