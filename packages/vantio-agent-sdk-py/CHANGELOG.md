@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.1.3
+
+Source version. First release number from this repository. 3.1.2 remains the version live from `vantioai/vantio-open-core`. This heading does not upload a wheel or sdist and it does not create a tag. No SDK behavior change from 3.1.2.
+
 ## 3.1.2
 
 Source version for the live destination record. This heading records the version in `pyproject.toml`. It does not upload a wheel or sdist and it does not create a tag.

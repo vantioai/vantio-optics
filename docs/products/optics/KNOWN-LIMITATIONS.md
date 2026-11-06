@@ -1,6 +1,6 @@
 # Known limitations
 
-This page lists what Optics does not do, and the gaps that are easy to over-read. Versions checked on 2026-10-21: published CLI 0.3.24, source CLI 0.3.26 (not an npm release), published Python 3.1.1, source Python 3.1.2 (not a PyPI release). Coverage, new-destination, and export commands in this source tree are described below.
+This page lists what Optics does not do, and the gaps that are easy to over-read. Versions checked on 2026-10-21: published CLI 0.3.24, source CLI 0.3.27 (not an npm release), published Python 3.1.1, source Python 3.1.3 (not a PyPI release). Coverage, new-destination, and export commands in this source tree are described below.
 
 ## Absent on purpose in the current products
 
@@ -56,4 +56,4 @@ Not covered by those tests as a product guarantee: SQLite, retention, cross-proc
 
 ## Unpublished source is not the product
 
-Reading `packages/vantio-agent-sdk-py` in this tree shows version 3.1.2. The PyPI project JSON on 2026-10-21 reported latest version 3.1.1. This manual did not upload a package. Behavior that exists only in 3.1.2 is source. It is not what `pip install vantio-agent-sdk` returns.
+Reading `packages/vantio-agent-sdk-py` in this tree shows version 3.1.3. The PyPI project JSON on 2026-10-21 reported latest version 3.1.1. This manual did not upload a package. Behavior that exists only in 3.1.3 is source. It is not what `pip install vantio-agent-sdk` returns.

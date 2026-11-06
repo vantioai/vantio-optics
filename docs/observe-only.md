@@ -51,7 +51,7 @@ Phantom Engine Enforce workflow: **Rules that stick** — author policy, dry-run
 
 ---
 
-## What Optics does not cover → Vantio Phantom Engine (Contact Vantio)
+## What Optics does not cover → Vantio Phantom Engine
 
 If you need protection on machines you own when a process skips the app wrap:
 

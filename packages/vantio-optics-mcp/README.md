@@ -12,7 +12,7 @@ This MCP lists local run logs, inspects traffic metadata, exports proofs, and di
 # from this repository
 pnpm install --filter @vantio/optics-mcp
 
-# published package, npm latest on 2026-10-21
+# npm latest checked 2026-10-26: 0.1.2. This directory is 0.1.3 (not yet published).
 npm install -g @vantio/optics-mcp@0.1.2
 ```
 
@@ -65,7 +65,7 @@ Local checkout:
 ## Upgrade path
 
 1. **Optics** (free, this MCP) — observe only
-2. **Phantom Engine** (Contact Vantio) — Observe, Enforce, and Control in one purchase
+2. **Phantom Engine** (self-serve, per server: https://vantio.ai/pricing) — Observe, Enforce, and Control in one purchase
 3. **Enterprise** (Contact Vantio) — governance add-on
 
 https://vantio.ai/pricing

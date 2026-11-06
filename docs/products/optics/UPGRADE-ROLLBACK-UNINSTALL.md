@@ -4,8 +4,8 @@
 
 | Package | Install | Published on 2026-10-21 | In this git tree |
 | --- | --- | --- | --- |
-| CLI | `npm install -g @vantio/cli@0.3.24` | 0.3.24 | 0.3.26 |
-| Python | `pip install 'vantio-agent-sdk==3.1.1'` | 3.1.1 | 3.1.2 |
+| CLI | `npm install -g @vantio/cli@0.3.24` | 0.3.24 | 0.3.27 |
+| Python | `pip install 'vantio-agent-sdk==3.1.1'` | 3.1.1 | 3.1.3 |
 
 Do not bump package versions as part of reading this manual. This manual does not publish anything.
 

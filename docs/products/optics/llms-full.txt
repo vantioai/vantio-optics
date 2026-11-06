@@ -23,14 +23,14 @@ Enforcement is Phantom Engine. This manual does not document Phantom Engine inst
 
 Checked against the public registries on 2026-10-21.
 
-| Package | What a fresh install returns | What this source tree contains |
+| Package | Release this manual describes (checked 2026-10-21) | What this source tree contains |
 | --- | --- | --- |
-| `@vantio/cli` (npm) | **0.3.24** | **0.3.26**. `npm install -g @vantio/cli` installs 0.3.24. |
-| `vantio-agent-sdk` (PyPI) | **3.1.1** | **3.1.2**. `pip install vantio-agent-sdk` installs 3.1.1. |
-| `@vantio/agent-sdk` (npm) | **0.2.4** | **0.2.4**. This package does not write `~/.vantio/runs`. |
-| `@vantio/optics-mcp` (npm) | **0.1.2** | **0.1.2**. Read-only local log reader. |
+| `@vantio/cli` (npm) | **0.3.24** | **0.3.27**. `npm install -g @vantio/cli` installed 0.3.24 at the 2026-10-21 18:19 UTC check; npm latest is now 0.3.26 (from vantio-open-core). |
+| `vantio-agent-sdk` (PyPI) | **3.1.1** | **3.1.3**. `pip install vantio-agent-sdk` installed 3.1.1 at the 2026-10-21 18:19 UTC check; PyPI latest is now 3.1.2 (from vantio-open-core). |
+| `@vantio/agent-sdk` (npm) | **0.2.4** | **0.2.5**. This package does not write `~/.vantio/runs`. |
+| `@vantio/optics-mcp` (npm) | **0.1.2** | **0.1.3**. Read-only local log reader. |
 
-Published CLI behavior below is 0.3.24 unless a sentence names this source tree. Published Python behavior for an unpinned install is 3.1.1. Pages that name Python 3.0.14 describe that older release, which is still on PyPI if you pin it. They are not what `pip install vantio-agent-sdk` returns. The 3.1.1 wheel's telemetry module matches this tree. `vantio/_http_observe.py` in this tree does not match that wheel.
+Published CLI behavior below is 0.3.24, the release this manual was checked against; npm latest is now 0.3.26. Published Python behavior below is 3.1.1; PyPI latest is now 3.1.2. Pages that name Python 3.0.14 describe that older release, which is still on PyPI if you pin it. They are not what `pip install vantio-agent-sdk` returns. The 3.1.1 wheel's telemetry module matches this tree. `vantio/_http_observe.py` in this tree does not match that wheel.
 
 An earlier pass of this manual, dated 2026-09-27, recorded Python 3.0.14 as the PyPI release. That is no longer the latest release.
 
@@ -153,7 +153,7 @@ Optics is free, local-first observability for supported AI traffic. It records t
 
 Optics observes. Phantom Engine is the separate product that enforces. This manual stops at Optics.
 
-The installable versions on 2026-10-21 are `@vantio/cli@0.3.24` and `vantio-agent-sdk==3.1.1`. This source tree is CLI 0.3.26 and Python 3.1.2. See [VERSION-METADATA.json](VERSION-METADATA.json).
+The installable versions on 2026-10-21 are `@vantio/cli@0.3.24` and `vantio-agent-sdk==3.1.1`. This source tree is CLI 0.3.27 and Python 3.1.3. See [VERSION-METADATA.json](VERSION-METADATA.json).
 
 ## Who this is for
 
@@ -251,7 +251,7 @@ CLI 0.3.24 does not send the ping unless `VANTIO_TELEMETRY=1`. Published Python 
 
 ## Read-only MCP
 
-`@vantio/optics-mcp@0.1.2` lists and renders local logs over the Model Context Protocol. It does not block or redact. Its tools are `optics_list_runs`, `optics_get_run`, `optics_prove`, `optics_discover_local`, `optics_explain`, and `optics_upgrade_path`. The last tool points at Phantom Engine. This manual does not document Phantom Engine.
+`@vantio/optics-mcp` (source in this commit is 0.1.3, not yet published) lists and renders local logs over the Model Context Protocol. It does not block or redact. Its tools are `optics_list_runs`, `optics_get_run`, `optics_prove`, `optics_discover_local`, `optics_explain`, and `optics_upgrade_path`. The last tool points at Phantom Engine. This manual does not document Phantom Engine.
 
 The MCP reader follows `VANTIO_HOME`. `vantio discover`, `search`, `tail`, `diff`, and `prove` read `~/.vantio` only. `vantio coverage`, `vantio destinations`, and `vantio export` read both, and they keep the allowlist and seen-destination file under `VANTIO_HOME` when that variable is set.
 
@@ -286,7 +286,7 @@ FILE: QUICKSTART.md
 
 Optics is local. A fresh CLI install needs no account and no API key. The record is metadata: host, size, timing, and process. Prompts and completions are absent from the record.
 
-Versions, checked on 2026-10-21: install `@vantio/cli@0.3.24` and, for Python, `vantio-agent-sdk==3.1.1`. This git tree is CLI 0.3.26 and Python 3.1.2. Details: [INSTALLATION.md](INSTALLATION.md).
+Versions, checked on 2026-10-21: install `@vantio/cli@0.3.24` and, for Python, `vantio-agent-sdk==3.1.1`. This git tree is CLI 0.3.27 and Python 3.1.3. Details: [INSTALLATION.md](INSTALLATION.md).
 
 ## 1. Install the CLI
 
@@ -383,7 +383,7 @@ Free Optics needs no account and no API key. The CLI does not read a saved key f
 | --- | --- |
 | Package | `@vantio/cli` |
 | Public version | `0.3.24` (npm latest on 2026-10-21) |
-| Source in this commit | `0.3.26`, not the npm package |
+| Source in this commit | `0.3.27`, not the npm package |
 | Command | `vantio` |
 | Engine | Node.js `>=18.3.0` |
 | License | MIT |
@@ -406,7 +406,7 @@ There is no curl installer at `https://vantio.ai/install.sh`.
 | --- | --- |
 | Package | `vantio-agent-sdk` |
 | Public version | `3.1.1` (PyPI latest on 2026-10-21) |
-| Source in this commit | `3.1.2`, not the PyPI package |
+| Source in this commit | `3.1.3`, not the PyPI package |
 | Interpreter | Python `>=3.10` |
 | License | MIT |
 
@@ -416,16 +416,17 @@ pip install 'vantio-agent-sdk==3.1.1'
 python -c 'import vantio; print(vantio.__version__)'
 ```
 
-The printed version on a fresh PyPI install is `3.1.1`. If you are working from this git tree, `vantio.__version__` is `3.1.2`. Those are different files for `vantio/_http_observe.py`. Telemetry in the 3.1.1 wheel matches this tree: off unless `VANTIO_TELEMETRY=1`. Read [PYTHON-GUIDE.md](PYTHON-GUIDE.md) before you describe HTTP outcomes.
+The printed version on a fresh PyPI install was `3.1.1` at the 2026-10-21 check; PyPI latest is now `3.1.2`. If you are working from this git tree, `vantio.__version__` is `3.1.3`. Those are different files for `vantio/_http_observe.py`. Telemetry in the 3.1.1 wheel matches this tree: off unless `VANTIO_TELEMETRY=1`. Read [PYTHON-GUIDE.md](PYTHON-GUIDE.md) before you describe HTTP outcomes.
 
-Pin `==3.1.1` for the current published package. An unpinned `pip install vantio-agent-sdk` resolved to 3.1.1 on the registry check for this manual. It will follow PyPI whenever a later release is published. `vantio-agent-sdk==3.0.14` remains available if you pin that older release.
+Pin `==3.1.2` for the current published package. An unpinned `pip install vantio-agent-sdk` resolved to 3.1.1 on the registry check for this manual. It will follow PyPI whenever a later release is published. `vantio-agent-sdk==3.0.14` remains available if you pin that older release.
 
 ## Node SDK
 
 | Item | Value |
 | --- | --- |
 | Package | `@vantio/agent-sdk` |
-| Public version | `0.2.4` |
+| Public version | `0.2.4` (npm on 2026-10-21) |
+| Source in this commit | `0.2.5` |
 | Engine | Node.js `>=18.0.0` |
 
 ```bash
@@ -440,7 +441,8 @@ This package does not write `~/.vantio/runs`. Recording for Node is the CLI inte
 | Item | Value |
 | --- | --- |
 | Package | `@vantio/optics-mcp` |
-| Public version | `0.1.2` |
+| Public version | `0.1.2` (npm on 2026-10-21) |
+| Source in this commit | `0.1.3` |
 | Role | Read local run logs. No enforcement tools. |
 
 ```bash
@@ -448,11 +450,11 @@ This package does not write `~/.vantio/runs`. Recording for Node is the CLI inte
 npx -y @vantio/optics-mcp@0.1.2
 ```
 
-The npm description text still contains an older product phrase. This manual's name for the product is Vantio Optics. Tools in the 0.1.2 server include `optics_list_runs`, `optics_get_run`, `optics_prove`, `optics_discover_local`, `optics_explain`, and `optics_upgrade_path`. The upgrade tool points at Phantom Engine. This manual does not reproduce Phantom Engine setup.
+The npm description text still contains an older product phrase. This manual's name for the product is Vantio Optics. Tools in the 0.1.3 server include `optics_list_runs`, `optics_get_run`, `optics_prove`, `optics_discover_local`, `optics_explain`, and `optics_upgrade_path`. The upgrade tool points at Phantom Engine. This manual does not reproduce Phantom Engine setup.
 
 The MCP reader honors `VANTIO_HOME`. The CLI reader does not. See [RECORD-REFERENCE.md](RECORD-REFERENCE.md).
 
-The package version is 0.1.2. The server constructor in this source tree reports version `0.1.0` on the MCP server object. Use the package version when you talk about what npm installed.
+The package version in this tree is 0.1.3. npm latest on 2026-10-21 is 0.1.2. The server constructor in this source tree reports version `0.1.0` on the MCP server object. Use the package version when you talk about what npm installed.
 
 ## What install does not do
 
@@ -560,7 +562,7 @@ Intercepted calls can print to the terminal while the process runs. The run file
 
 ## Node SDK
 
-`@vantio/agent-sdk@0.2.4` does not write the run log. `vantio run` does. Do not expect `shield()` from the Node SDK, used alone, to create `~/.vantio/runs`.
+`@vantio/agent-sdk` (source in this commit is 0.2.5, not yet published) does not write the run log. `vantio run` does. Do not expect `shield()` from the Node SDK, used alone, to create `~/.vantio/runs`.
 
 ========================================================================
 FILE: PYTHON-GUIDE.md
@@ -568,18 +570,18 @@ FILE: PYTHON-GUIDE.md
 
 # Python guide
 
-Registry check: 2026-10-21. The unpinned install is 3.1.1. This git tree is 3.1.2.
+Registry check: 2026-10-21. The unpinned install installed 3.1.1 at the 2026-10-21 18:19 UTC check; PyPI latest is now 3.1.2 (from vantio-open-core). This git tree is 3.1.3.
 
 | | Published install | This git tree |
 | --- | --- | --- |
 | Package | `vantio-agent-sdk` | `vantio-agent-sdk` |
-| Version | **3.1.1** | **3.1.2**, not on PyPI |
-| `pip install vantio-agent-sdk` | Installs 3.1.1 | Does not install 3.1.2 |
+| Version | **3.1.1** | **3.1.3**, not on PyPI |
+| `pip install vantio-agent-sdk` | installed 3.1.1 at the 2026-10-21 18:19 UTC check; PyPI latest is now 3.1.2 (from vantio-open-core) | Does not install 3.1.3 |
 | Telemetry gate | Off unless `VANTIO_TELEMETRY=1`. The wheel's `vantio/_telemetry.py` matches this tree. | Same file |
 | `schema_status` on the run file | `unstable-pre-1.0` in the 3.1.1 wheel | `unstable-pre-1.0` |
-| `vantio/_http_observe.py` | The 3.1.1 wheel | Larger than the 3.1.1 wheel. Do not describe 3.1.2 as the published package. |
+| `vantio/_http_observe.py` | The 3.1.1 wheel | Larger than the 3.1.1 wheel. Do not describe 3.1.3 as the published package. |
 
-`vantio-agent-sdk==3.0.14` is an older release. Its telemetry and HTTP notes stay in [shield() on 3.0.14](#shield-on-3014). CLI `@vantio/cli@0.3.24` is the published reader. This tree's CLI is 0.3.26. Display rules are in [STATUS-AND-OUTCOMES.md](STATUS-AND-OUTCOMES.md).
+`vantio-agent-sdk==3.0.14` is an older release. Its telemetry and HTTP notes stay in [shield() on 3.0.14](#shield-on-3014). CLI `@vantio/cli@0.3.24` is the published reader. This tree's CLI is 0.3.27. Display rules are in [STATUS-AND-OUTCOMES.md](STATUS-AND-OUTCOMES.md).
 
 ## Install the published SDK
 
@@ -654,9 +656,9 @@ A local check of the published 3.0.14 wheel, using `urllib.request.urlopen` agai
 
 ## Published 3.1.1, from the 3.1.0 record
 
-`pip install vantio-agent-sdk` on 2026-10-21 installs 3.1.1. The package changelog records 3.1.1 as no SDK behavior change from 3.1.0. The 3.1.1 wheel writes `vantio_run_log` `"1"`, `schema_version` 2, `schema_status` `unstable-pre-1.0`, and `workflow` `sight_loop`. Its telemetry, outcome, process-wrap, and `sdk.py` modules match this tree. Its HTTP observe module does not match 3.1.2.
+`pip install vantio-agent-sdk` on 2026-10-21 installed 3.1.1 at the 2026-10-21 18:19 UTC check; PyPI latest is now 3.1.2 (from vantio-open-core). The package changelog records 3.1.1 as no SDK behavior change from 3.1.0. The 3.1.1 wheel writes `vantio_run_log` `"1"`, `schema_version` 2, `schema_status` `unstable-pre-1.0`, and `workflow` `sight_loop`. Its telemetry, outcome, process-wrap, and `sdk.py` modules match this tree. Its HTTP observe module does not match 3.1.3.
 
-The bullets below are the 3.1.0 record. They are not a line-by-line description of the larger 3.1.2 file. The 3.1.2 changelog adds a live destination record. That addition is source, not the 3.1.1 wheel.
+The bullets below are the 3.1.0 record. They are not a line-by-line description of the larger 3.1.3 file. The 3.1.2 changelog adds a live destination record. That addition is source, not the 3.1.1 wheel.
 
 In the 3.1.0 record published as 3.1.1:
 
@@ -795,7 +797,7 @@ Optics keeps one JSON object per trace id. The shape is `unstable-pre-1.0`. Node
 | Node interceptor | `$VANTIO_HOME/runs` if `VANTIO_HOME` is set, otherwise `~/.vantio/runs` |
 | Python SDK | Same rule: `VANTIO_HOME` or `~/.vantio`, then `runs` |
 | CLI reader (`prove`, `search`, `tail`, `diff`, `discover`, `status`) | `~/.vantio/runs` only. `VANTIO_HOME` is ignored. |
-| `@vantio/optics-mcp@0.1.2` | Honors `VANTIO_HOME`, otherwise `~/.vantio/runs` |
+| `@vantio/optics-mcp` (source in this commit is 0.1.3, not yet published) | Honors `VANTIO_HOME`, otherwise `~/.vantio/runs` |
 
 File name: the trace id, characters outside `[A-Za-z0-9_-]` replaced with `_`, truncated to 80 characters, plus `.json`. Writing the same trace id again replaces the file.
 
@@ -916,7 +918,7 @@ Tests in the repository write the same kind of file. Those tests are not part of
 
 Node 0.3.24 and Python 3.0.14 or 3.1.0 source can share one directory. Envelopes differ. No command migrates them. No command refuses a newer `schema_version`. Rollback of the CLI is best-effort parse of whatever JSON is there.
 
-`@vantio/agent-sdk` (Node) 0.2.4 does not write this directory.
+`@vantio/agent-sdk` (Node) 0.2.5 does not write this directory.
 
 ========================================================================
 FILE: STATUS-AND-OUTCOMES.md
@@ -1248,8 +1250,8 @@ FILE: UPGRADE-ROLLBACK-UNINSTALL.md
 
 | Package | Install | Published on 2026-10-21 | In this git tree |
 | --- | --- | --- | --- |
-| CLI | `npm install -g @vantio/cli@0.3.24` | 0.3.24 | 0.3.26 |
-| Python | `pip install 'vantio-agent-sdk==3.1.1'` | 3.1.1 | 3.1.2 |
+| CLI | `npm install -g @vantio/cli@0.3.24` | 0.3.24 | 0.3.27 |
+| Python | `pip install 'vantio-agent-sdk==3.1.1'` | 3.1.1 | 3.1.3 |
 
 Do not bump package versions as part of reading this manual. This manual does not publish anything.
 
@@ -1348,7 +1350,7 @@ FILE: KNOWN-LIMITATIONS.md
 
 # Known limitations
 
-This page lists what Optics does not do, and the gaps that are easy to over-read. Versions checked on 2026-10-21: published CLI 0.3.24, source CLI 0.3.26 (not an npm release), published Python 3.1.1, source Python 3.1.2 (not a PyPI release). Coverage, new-destination, and export commands in this source tree are described below.
+This page lists what Optics does not do, and the gaps that are easy to over-read. Versions checked on 2026-10-21: published CLI 0.3.24, source CLI 0.3.27 (not an npm release), published Python 3.1.1, source Python 3.1.3 (not a PyPI release). Coverage, new-destination, and export commands in this source tree are described below.
 
 ## Absent on purpose in the current products
 
@@ -1404,7 +1406,7 @@ Not covered by those tests as a product guarantee: SQLite, retention, cross-proc
 
 ## Unpublished source is not the product
 
-Reading `packages/vantio-agent-sdk-py` in this tree shows version 3.1.2. The PyPI project JSON on 2026-10-21 reported latest version 3.1.1. This manual did not upload a package. Behavior that exists only in 3.1.2 is source. It is not what `pip install vantio-agent-sdk` returns.
+Reading `packages/vantio-agent-sdk-py` in this tree shows version 3.1.3. The PyPI project JSON on 2026-10-21 reported latest version 3.1.1. This manual did not upload a package. Behavior that exists only in 3.1.3 is source. It is not what `pip install vantio-agent-sdk` returns.
 
 ========================================================================
 FILE: AI-GUIDE.md
@@ -1421,7 +1423,7 @@ Use this file before answering questions about Vantio Optics. The version-matche
 | `npm install -g @vantio/cli` | `@vantio/cli@0.3.24` (npm latest on 2026-10-21) |
 | `pip install vantio-agent-sdk` | `vantio-agent-sdk==3.1.1` (PyPI latest on 2026-10-21) |
 
-This git tree contains CLI **0.3.26** and Python **3.1.2**. Neither is what those install commands return. Describe 0.3.26 and 3.1.2 only as source. Published CLI 0.3.24 is the CLI you may describe for `npm install -g @vantio/cli`: do not invent later CLI flags as part of that package. Python 3.0.14 is an older pin, not the unpinned install.
+This git tree contains CLI **0.3.27** and Python **3.1.3**. Neither is what those install commands return. Describe 0.3.27 and 3.1.3 only as source. Published CLI 0.3.24 is the CLI this manual describes; `npm install -g @vantio/cli` now returns 0.3.26 from vantio-open-core: do not invent later CLI flags as part of that package. Python 3.0.14 is an older pin, not the unpinned install.
 
 `contract_version` is `unstable-pre-1.0`. Command `--json` output carries `schema_status` `unstable-pre-1.0` and may change. There is no stable public schema.
 
@@ -1491,10 +1493,10 @@ This manual is version 1. It is a docs set. It does not bump `@vantio/cli`, `van
 
 | You installed | Read |
 | --- | --- |
-| `@vantio/cli@0.3.24` | The published CLI is 0.3.24. Node pages that do not name a later source version match that package. This tree is 0.3.26. |
+| `@vantio/cli@0.3.24` | The published CLI is 0.3.24. Node pages that do not name a later source version match that package. This tree is 0.3.27. |
 | `vantio-agent-sdk==3.1.1` | [PYTHON-GUIDE.md](PYTHON-GUIDE.md) for the current PyPI release. |
 | `vantio-agent-sdk==3.0.14` | The 3.0.14 sections of [PYTHON-GUIDE.md](PYTHON-GUIDE.md). That pin is older than PyPI latest. |
-| A checkout of this repository | `pyproject.toml` says 3.1.2. That string is source. `pip install` does not install it. |
+| A checkout of this repository | `pyproject.toml` says 3.1.3. That string is source. `pip install` does not install it. |
 
 Package changelogs live next to the packages (`packages/vantio-agent-sdk-py/CHANGELOG.md`). This repository's history starts fresh and does not contain the older release tags. When a changelog line and the published package disagree, the published package wins.
 
@@ -1504,7 +1506,7 @@ Package changelogs live next to the packages (`packages/vantio-agent-sdk-py/CHAN
 
 `3.0.15` in git is a documentation and gate correction that makes Python telemetry opt-in. Its changelog text says the payload schema is unchanged and also says telemetry stays off unless `VANTIO_TELEMETRY=1`. The gate change is real in that commit. The release was not what PyPI served. Do not tell operators that 3.0.15 is installed.
 
-`3.1.0` records HTTP outcome fields, `ok` aligned to status, socket timing, and the opt-in telemetry gate. PyPI 3.1.1 is that behavior line. CLI 0.3.24 was not rebuilt to match later customer sentences. This tree's Python package is 3.1.2, which is not the PyPI release.
+`3.1.0` records HTTP outcome fields, `ok` aligned to status, socket timing, and the opt-in telemetry gate. PyPI 3.1.1 is that behavior line. CLI 0.3.24 was not rebuilt to match later customer sentences. This tree's Python package is 3.1.3, which is not the PyPI release.
 
 ## CLI history that still affects support
 
@@ -1516,7 +1518,7 @@ Command `--json` output includes `schema_status` `unstable-pre-1.0`. That line m
 
 | Manual version | Meaning |
 | --- | --- |
-| 1 | Public manual under `docs/products/optics/`. Registry check 2026-10-21: CLI 0.3.24 and PyPI Python 3.1.1. This tree is CLI 0.3.26 and Python 3.1.2. |
+| 1 | Public manual under `docs/products/optics/`. Registry check 2026-10-21: CLI 0.3.24 and PyPI Python 3.1.1. This tree is CLI 0.3.27 and Python 3.1.3. |
 
 When a later manual version is cut, it should name the registry versions it was checked against. Keep published versions and source versions in separate columns.
 
@@ -1552,14 +1554,14 @@ FILE: VERSION-METADATA.json
     }
   },
   "source_tree": {
-    "@vantio/cli": "0.3.26",
-    "vantio-agent-sdk": "3.1.2",
-    "@vantio/agent-sdk": "0.2.4",
-    "@vantio/optics-mcp": "0.1.2"
+    "@vantio/cli": "0.3.27",
+    "vantio-agent-sdk": "3.1.3",
+    "@vantio/agent-sdk": "0.2.5",
+    "@vantio/optics-mcp": "0.1.3"
   },
   "notes": [
-    "Unpinned npm install -g @vantio/cli resolves to 0.3.24.",
-    "Unpinned pip install vantio-agent-sdk resolves to 3.1.1.",
+    "Unpinned npm install -g @vantio/cli installed 0.3.24 at the 2026-10-21 18:19 UTC check; npm latest is now 0.3.26 (from vantio-open-core).",
+    "Unpinned pip install vantio-agent-sdk installed 3.1.1 at the 2026-10-21 18:19 UTC check; PyPI latest is now 3.1.2 (from vantio-open-core).",
     "Published 3.1.1 vantio/_telemetry.py matches this tree. vantio/_http_observe.py does not.",
     "Python 3.0.14 remains on PyPI and is not the latest release.",
     "@vantio/cli 0.3.24 has registry signatures and no provenance attestation."

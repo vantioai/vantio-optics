@@ -1,8 +1,8 @@
 # Vantio Optics
 
-> Public manual version 1 for Vantio Optics. Free local metadata for supported AI calls. Registry check 2026-10-21: CLI `@vantio/cli@0.3.24`, PyPI `vantio-agent-sdk` 3.1.1. This tree is CLI 0.3.26 and Python 3.1.2. Contract `unstable-pre-1.0`. Optics observes. Enforcement is Phantom Engine, outside this manual.
+> Public manual version 1 for Vantio Optics. Free local metadata for supported AI calls. Registry check 2026-10-21: CLI `@vantio/cli@0.3.24`, PyPI `vantio-agent-sdk` 3.1.1. This tree is CLI 0.3.27 and Python 3.1.3. Contract `unstable-pre-1.0`. Optics observes. Enforcement is Phantom Engine, outside this manual.
 
-Installable behavior is CLI 0.3.24 and Python 3.1.1. Do not describe 0.3.26 or 3.1.2 as `npm install` or `pip install`.
+Installable behavior is CLI 0.3.24 and Python 3.1.1. Do not describe 0.3.27 or 3.1.3 as `npm install` or `pip install`.
 
 ## Start here
 
