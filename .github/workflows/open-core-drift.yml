@@ -2,6 +2,10 @@ name: Open-core drift
 
 # Read-only. Compares package code here with vantioai/vantio-open-core main
 # while open-core still publishes. See the freeze in docs/publishing.md.
+#
+# vantio-open-core is private. The checkout needs the repository secret
+# OPEN_CORE_READ_TOKEN: a fine-grained token with read-only Contents access
+# to vantioai/vantio-open-core. Without it the job reports a skip and passes.
 
 on:
   pull_request: {}
@@ -24,13 +28,28 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Check for the open-core read token
+        id: token
+        env:
+          OPEN_CORE_READ_TOKEN: ${{ secrets.OPEN_CORE_READ_TOKEN }}
+        run: |
+          if [ -n "$OPEN_CORE_READ_TOKEN" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::OPEN_CORE_READ_TOKEN is not set. vantio-open-core is private, so the drift check is skipped."
+          fi
+
       - name: Checkout vantio-open-core main
+        if: steps.token.outputs.present == 'true'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: vantioai/vantio-open-core
           ref: main
           path: .open-core
+          token: ${{ secrets.OPEN_CORE_READ_TOKEN }}
           persist-credentials: false
 
       - name: Compare
+        if: steps.token.outputs.present == 'true'
         run: python3 scripts/check_open_core_drift.py .open-core
