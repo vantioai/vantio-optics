@@ -232,7 +232,11 @@ describe("vantio prove and tail usage errors", () => {
     }
   });
 
-  test("prove reports a read-only destination without a Node stack", async () => {
+  // Root ignores directory write bits, so the read-only destination is writable
+  // and the write cannot fail. CI runs as a normal user.
+  const runningAsRoot = typeof process.getuid === "function" && process.getuid() === 0;
+
+  test("prove reports a read-only destination without a Node stack", { skip: runningAsRoot ? "root can write to a mode 555 directory" : false }, async () => {
     const home = mkdtempSync(join("/tmp", "vantio-prove-ro-"));
     const locked = join(home, "locked");
     mkdirSync(locked);
