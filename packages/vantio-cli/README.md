@@ -9,7 +9,7 @@
 > The running version is `vantio --version`. Python support requires `vantio-agent-sdk`. Follow the current Python SDK example and verify that a supported outbound event appears before relying on the coverage state.
 
 ```bash
-npm install -g @vantio/cli@0.3.24
+npm install -g @vantio/cli@0.3.27
 ```
 
 0.3.24 is the npm release checked on 2026-10-21. This directory's `package.json` is 0.3.26. There is no curl installer at `https://vantio.ai/install.sh`. [vantio.ai/install](https://vantio.ai/install) goes to the install docs. Python support requires `vantio-agent-sdk`. Follow the current Python SDK example and verify that a supported outbound event appears before relying on the coverage state.
@@ -21,7 +21,7 @@ npm install -g @vantio/cli@0.3.24
 ### Step 1 — Install
 
 ```bash
-npm install -g @vantio/cli@0.3.24
+npm install -g @vantio/cli@0.3.27
 ```
 
 That's the install step for the npm release. Works on macOS, Linux, and Windows (WSL).

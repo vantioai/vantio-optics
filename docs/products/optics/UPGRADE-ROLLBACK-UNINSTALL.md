@@ -4,7 +4,7 @@
 
 | Package | Install | Published on 2026-10-21 | In this git tree |
 | --- | --- | --- | --- |
-| CLI | `npm install -g @vantio/cli@0.3.24` | 0.3.24 | 0.3.26 |
+| CLI | `npm install -g @vantio/cli@0.3.27` | 0.3.27 | 0.3.27 |
 | Python | `pip install 'vantio-agent-sdk==3.1.1'` | 3.1.1 | 3.1.2 |
 
 Do not bump package versions as part of reading this manual. This manual does not publish anything.
@@ -39,7 +39,7 @@ v2 files, if you still have them, are not migrated. The CLI accepts JSON objects
 
 CLI 0.3.24 will still display application outcome from the HTTP status and will still ignore `ok`. You do not need a CLI upgrade to read a 3.1.0 file's status code. You do need to avoid assuming 3.1.0 fields exist on a 3.0.14 file.
 
-The published CLI is 0.3.24. Customer sentences such as "Provider rate-limited the request" are Python package text. They are not CLI 0.3.24 labels.
+The published CLI is 0.3.27. Customer sentences such as "Provider rate-limited the request" are Python package text. They are not CLI 0.3.24 labels.
 
 ## Mixed files in one directory
 
@@ -51,7 +51,7 @@ There is no negotiation and no refusal of a newer file. Restoring an older CLI k
 
 ```bash
 # Example status: illustrative
-npm install -g @vantio/cli@0.3.24
+npm install -g @vantio/cli@0.3.27
 pip install 'vantio-agent-sdk==3.1.1'
 ```
 

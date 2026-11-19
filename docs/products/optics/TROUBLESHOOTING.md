@@ -8,7 +8,7 @@ vantio --version
 python -c 'import vantio; print(vantio.__version__)'
 ```
 
-Expect CLI `0.3.24`. Expect Python `3.0.14` on a PyPI install. Python `3.1.0` means this git tree, not the published package.
+Expect CLI `0.3.27`. Expect Python `3.0.14` on a PyPI install. Python `3.1.0` means this git tree, not the published package.
 
 ## No run file
 

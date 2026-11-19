@@ -6,7 +6,7 @@ Optics is free, local-first observability for supported AI traffic. It records t
 
 Optics observes. Phantom Engine is the separate product that enforces. This manual stops at Optics.
 
-The installable versions on 2026-10-21 are `@vantio/cli@0.3.24` and `vantio-agent-sdk==3.1.1`. This source tree is CLI 0.3.26 and Python 3.1.2. See [VERSION-METADATA.json](VERSION-METADATA.json).
+The installable versions on 2026-10-21 are `@vantio/cli@0.3.27` and `vantio-agent-sdk==3.1.1`. This source tree is CLI 0.3.26 and Python 3.1.2. See [VERSION-METADATA.json](VERSION-METADATA.json).
 
 ## Who this is for
 
@@ -28,7 +28,7 @@ You start a process with `vantio run` (Node or Python) or you enter Python `shie
 
 ```bash
 # Example status: illustrative
-npm install -g @vantio/cli@0.3.24
+npm install -g @vantio/cli@0.3.27
 vantio run node agent.js
 vantio prove
 ```

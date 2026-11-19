@@ -4,11 +4,18 @@ This file starts at the versions the public registries served on 2026-10-21. It 
 
 Merging a pull request does not publish.
 
+## `@vantio/cli` 0.3.27
+
+npm release, published `2026-11-19T05:36:28.325Z` from `vantioai/vantio-open-core` (`8d0ee95`, release gate run 44457365638). npm latest. The registry tarball is byte-identical to the sealed open-core artifact: sha256 `02939ca6c6b5f3677e368b005d75da7550d01243d7158bc006e3ef420c1e2f4d`, 98062 bytes. Registry signatures, no provenance attestation.
+
+- `vantio run python` installs the Python wrap when `vantio-agent-sdk` is installed. 0.3.26 raised `TypeError` and recorded no Python calls (#10).
+- `node:http`, `node:https` and `node:http2` calls record method, path, HTTP status, content type, content length and duration. 0.3.26 recorded them as `REQUEST` with no status (#11).
+
 ## Registry check on 2026-11-19
 
 npm and PyPI now serve versions published on 2026-10-21 after the checks below:
 
-- `@vantio/cli` 0.3.26, npm latest, published `2026-10-21T22:43:41.535Z`. Registry signatures, no provenance attestation. Known issue: with `vantio-agent-sdk` installed, `vantio run python` raises `TypeError` while installing the Python wrap and records no Python calls. 0.3.24 does not have this issue. The fix is in this tree, not on npm.
+- `@vantio/cli` 0.3.26, npm latest until 0.3.27, published `2026-10-21T22:43:41.535Z`. Registry signatures, no provenance attestation. Known issue: with `vantio-agent-sdk` installed, `vantio run python` raises `TypeError` while installing the Python wrap and records no Python calls. 0.3.24 does not have this issue. Fixed in 0.3.27.
 - `vantio-agent-sdk` 3.1.2, PyPI latest, uploaded `2026-10-21T22:37:53Z`. Wheel and sdist.
 
 `@vantio/agent-sdk` 0.2.4 and `@vantio/optics-mcp` 0.1.2 are unchanged.

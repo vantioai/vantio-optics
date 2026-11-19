@@ -19,7 +19,7 @@ npm install -g @vantio/optics-mcp@0.1.2
 Generate Optics traffic first (optional but recommended):
 
 ```bash
-npm install -g @vantio/cli@0.3.24
+npm install -g @vantio/cli@0.3.27
 vantio run node your-agent.js
 ```
 

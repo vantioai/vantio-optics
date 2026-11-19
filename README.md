@@ -10,27 +10,27 @@ Free Optics needs no account and no API key.
 
 ## Install
 
-These versions are what the public registries returned on 2026-10-21. Pin them. An unpinned install follows whatever the registry marks latest later.
+These versions are what the public registries returned on 2026-11-19. Pin them. An unpinned install follows whatever the registry marks latest later.
 
 | Package | Registry | Version | Install |
 | --- | --- | --- | --- |
-| `@vantio/cli` | npm | 0.3.24 | `npm install -g @vantio/cli@0.3.24` |
+| `@vantio/cli` | npm | 0.3.27 | `npm install -g @vantio/cli@0.3.27` |
 | `vantio-agent-sdk` | PyPI | 3.1.1 | `pip install 'vantio-agent-sdk==3.1.1'` |
 | `@vantio/agent-sdk` | npm | 0.2.4 | `npm install @vantio/agent-sdk@0.2.4` |
 | `@vantio/optics-mcp` | npm | 0.1.2 | `npx -y @vantio/optics-mcp@0.1.2` |
 
 `@vantio/cli` needs Node.js `>=18.3.0`. `vantio-agent-sdk` needs Python `>=3.10`. There is no installer at `https://vantio.ai/install.sh`.
 
-Keep the `@vantio/cli@0.3.24` pin. On 2026-11-19 npm marks `@vantio/cli` **0.3.26** as latest, so `npm install -g @vantio/cli` without a version installs 0.3.26. In 0.3.26, `vantio run python` prints `Python wrap did not install (TypeError)` and records no Python calls when `vantio-agent-sdk` is installed. Node recording is not affected. 0.3.24 records Python calls with `vantio-agent-sdk` 3.1.1 and 3.1.2. The fix is in this tree and is not on npm yet.
+`@vantio/cli` 0.3.27 is npm latest. It fixes two 0.3.26 bugs: `vantio run python` failed to install the Python wrap when `vantio-agent-sdk` was installed, and Node `http`/`https` calls showed no HTTP status. Do not pin 0.3.26.
 
-PyPI marks `vantio-agent-sdk` **3.1.2** as latest. The 3.1.1 pin above still works.
+PyPI marks `vantio-agent-sdk` **3.1.2** as latest. The 3.1.1 pin above also works with CLI 0.3.27.
 
-Build from this tree only when you mean to run this source.
+This tree's packages match the registry versions above. Build from this tree only when you mean to run this source.
 
 ## Quick start
 
 ```bash
-npm install -g @vantio/cli@0.3.24
+npm install -g @vantio/cli@0.3.27
 vantio --version
 vantio run node agent.js
 vantio discover --local

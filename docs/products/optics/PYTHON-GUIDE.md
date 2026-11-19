@@ -11,7 +11,7 @@ Registry check: 2026-10-21. The unpinned install is 3.1.1. This git tree is 3.1.
 | `schema_status` on the run file | `unstable-pre-1.0` in the 3.1.1 wheel | `unstable-pre-1.0` |
 | `vantio/_http_observe.py` | The 3.1.1 wheel | Larger than the 3.1.1 wheel. Do not describe 3.1.2 as the published package. |
 
-`vantio-agent-sdk==3.0.14` is an older release. Its telemetry and HTTP notes stay in [shield() on 3.0.14](#shield-on-3014). CLI `@vantio/cli@0.3.24` is the published reader. This tree's CLI is 0.3.26. Display rules are in [STATUS-AND-OUTCOMES.md](STATUS-AND-OUTCOMES.md).
+`vantio-agent-sdk==3.0.14` is an older release. Its telemetry and HTTP notes stay in [shield() on 3.0.14](#shield-on-3014). CLI `@vantio/cli@0.3.27` is the published reader. This tree's CLI is 0.3.26. Display rules are in [STATUS-AND-OUTCOMES.md](STATUS-AND-OUTCOMES.md).
 
 ## Install the published SDK
 
@@ -100,7 +100,7 @@ In the 3.1.0 record published as 3.1.1:
 - `http.client` and `pycurl` still do not store an HTTP status on the success path. Outcome stays `UNAVAILABLE` with the line `Provider outcome unavailable`.
 - Telemetry matches the CLI opt-in rule.
 
-CLI customer-line text for those outcomes is deferred. `@vantio/cli@0.3.24` still says "Application outcome" and "Application error". It was not reopened for the 3.1.0 wording.
+CLI customer-line text for those outcomes is deferred. `@vantio/cli@0.3.27` still says "Application outcome" and "Application error". It was not reopened for the 3.1.0 wording.
 
 ## Upgrade from Python v2
 

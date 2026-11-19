@@ -3,7 +3,7 @@
 Zero code changes for observe — wrap the process:
 
 ```bash
-npm install -g @vantio/cli@0.3.24
+npm install -g @vantio/cli@0.3.27
 vantio run node agent.js
 ```
 

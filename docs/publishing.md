@@ -4,26 +4,26 @@ This repository does not publish when a pull request merges. `.github/workflows/
 
 ## Freeze while open-core publishes
 
-Until the npm and PyPI trusted publishers point at this repository, `vantioai/vantio-open-core` is the publishing source. It publishes `@vantio/cli` 0.3.26 and `vantio-agent-sdk` 3.1.2 from sealed bytes. The `package.json` and `pyproject.toml` links here name this repository, so a pack from this tree does not match those sealed bytes. Do not publish those versions from here.
+Until the npm and PyPI trusted publishers point at this repository, `vantioai/vantio-open-core` is the publishing source. It publishes `@vantio/cli` 0.3.27 and `vantio-agent-sdk` 3.1.2 from sealed bytes. The `package.json` and `pyproject.toml` links here name this repository, so a pack from this tree does not match those sealed bytes. Do not publish those versions from here.
 
 During the freeze, package code in `packages/` and `extensions/vantio-optics` stays byte-identical to open-core `main`. Make a code change in both repositories in the same change window. The `Open-core drift` workflow (`scripts/check_open_core_drift.py`) fails on any other difference. READMEs, changelogs, tests, and repository links may differ.
 
-The freeze ends when the first release after 0.3.26 and 3.1.2 is cut from this repository, the trusted publishers are switched as described below, and the package directories are removed from open-core. Remove the drift workflow in that same change.
+The freeze ends when the first release after 0.3.27 and 3.1.2 is cut from this repository, the trusted publishers are switched as described below, and the package directories are removed from open-core. Remove the drift workflow in that same change.
 
-Registry check on 2026-10-21:
+Registry check on 2026-11-19:
 
 | Package | Registry | Latest | This tree |
 | --- | --- | --- | --- |
-| `@vantio/cli` | npm | 0.3.24 | 0.3.26 |
+| `@vantio/cli` | npm | 0.3.27 | 0.3.27 |
 | `@vantio/agent-sdk` | npm | 0.2.4 | 0.2.4 |
 | `@vantio/optics-mcp` | npm | 0.1.2 | 0.1.2 |
-| `vantio-agent-sdk` | PyPI | 3.1.1 | 3.1.2 |
+| `vantio-agent-sdk` | PyPI | 3.1.2 | 3.1.2 |
 
 npm and PyPI reject a second upload of a version that already exists. A later publish from this tree is a new version, not a copy of 0.3.24 or 3.1.1.
 
 ## What the registries show today
 
-`@vantio/cli@0.3.24` has registry signatures and no provenance attestation (`dist.attestations` is absent). `vantio-open-core`'s `.github/workflows/npm-publish.yml` does not call `npm publish` and does not set `id-token: write`. That file is not evidence that npm trusted publishing already released 0.3.24.
+`@vantio/cli@0.3.27` has registry signatures and no provenance attestation (`dist.attestations` is absent). `vantio-open-core`'s `.github/workflows/npm-publish.yml` does not call `npm publish` and does not set `id-token: write`. That file is not evidence that npm trusted publishing released any CLI version. 0.3.27 was published by `scripts/release/promote_npm.mjs --publish` in open-core after release gate run 44457365638.
 
 PyPI trusted publishing for `vantio-agent-sdk` is wired in `vantio-open-core` at `.github/workflows/pypi-publish.yml`. That workflow requires all of the following before it will upload:
 
@@ -54,7 +54,7 @@ Do this once per package: `@vantio/cli`, `@vantio/agent-sdk`, and `@vantio/optic
 8. Node.js must be `>=22.14.0` and the npm CLI must be `>=11.5.1`. Provenance is attached automatically for a public package published from a public repository. Do not set `provenance` to false.
 9. Each package's `repository.url` must be `git+https://github.com/vantioai/vantio-optics.git`. That value is already set in this tree. Publish from the package directory so the monorepo `directory` field stays accurate.
 10. A new trusted publisher must complete a successful publish within 2 days or the configuration expires. After it works, revoke leftover automation tokens you no longer need (npm package settings, Publishing access, "Require two-factor authentication and disallow tokens" is the token lockdown; trusted publishers keep working).
-11. Only then delete the `publishing-disabled` job, remove `needs: publishing-disabled`, and remove `if: false` from `publish-npm`. Dispatch for a version that is not already on npm. `@vantio/cli` 0.3.26 is a new release. `@vantio/agent-sdk` 0.2.4 and `@vantio/optics-mcp` 0.1.2 are already on npm, so publishing them again fails until their versions change. Do not dispatch from this pull request.
+11. Only then delete the `publishing-disabled` job, remove `needs: publishing-disabled`, and remove `if: false` from `publish-npm`. Dispatch for a version that is not already on npm. `@vantio/cli` 0.3.27 is already on npm, so the next CLI release must be a new version. `@vantio/agent-sdk` 0.2.4 and `@vantio/optics-mcp` 0.1.2 are already on npm, so publishing them again fails until their versions change. Do not dispatch from this pull request.
 
 `workflow_dispatch` validation uses the workflow file that was triggered. Keep the publish command in `publish.yml` itself. Do not hide `npm publish` behind a reusable workflow with a different filename.
 
