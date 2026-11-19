@@ -4,6 +4,15 @@ This file starts at the versions the public registries served on 2026-10-21. It 
 
 Merging a pull request does not publish.
 
+## Registry check on 2026-11-19
+
+npm and PyPI now serve versions published on 2026-10-21 after the checks below:
+
+- `@vantio/cli` 0.3.26, npm latest, published `2026-10-21T22:43:41.535Z`. Registry signatures, no provenance attestation. Known issue: with `vantio-agent-sdk` installed, `vantio run python` raises `TypeError` while installing the Python wrap and records no Python calls. 0.3.24 does not have this issue. The fix is in this tree, not on npm.
+- `vantio-agent-sdk` 3.1.2, PyPI latest, uploaded `2026-10-21T22:37:53Z`. Wheel and sdist.
+
+`@vantio/agent-sdk` 0.2.4 and `@vantio/optics-mcp` 0.1.2 are unchanged.
+
 ## Current registry releases
 
 ### `@vantio/cli` 0.3.24
@@ -35,6 +44,8 @@ The package changelog in this tree records 3.1.1 as a publication of the 3.1.0 b
 `vantio-agent-sdk==3.0.14` is still on PyPI. It is not the latest release. Pin `==3.1.1` for the current one.
 
 ## In this tree, not on a registry
+
+As of 2026-11-19 the two versions below are also on the registries. The notes under them describe this tree.
 
 ### `@vantio/cli` 0.3.26
 
