@@ -675,6 +675,26 @@ def _account_response_bytes(headers: Any) -> None:
         return
 
 
+def _urllib_method(url: Any, data: Any) -> str:
+    """The method urllib will send for urlopen(url, data) or opener.open(url, data).
+
+    A Request carries its own method and data. OpenerDirector.open sets
+    req.data = data when data is given, and Request.get_method() then returns
+    the explicit method, else POST when there is data, else GET. Reading only
+    the data argument recorded Request(..., method="POST") as GET.
+    """
+    get_method = getattr(url, "get_method", None)
+    if not callable(get_method):
+        return "POST" if data is not None else "GET"
+    if data is None:
+        try:
+            return str(get_method() or "GET").upper()
+        except Exception:
+            return "POST" if getattr(url, "data", None) is not None else "GET"
+    explicit = getattr(url, "method", None)
+    return str(explicit).upper() if explicit else "POST"
+
+
 def _observe_urlopen(url, data=None, timeout=None, *args, **kwargs):
     hostname, port, path = _host_port_from_url(url)
     try:
@@ -686,6 +706,7 @@ def _observe_urlopen(url, data=None, timeout=None, *args, **kwargs):
         scheme = "https"
 
     body = data if data is not None else getattr(url, "data", None)
+    method = _urllib_method(url, data)
     kind, payload, redactions, record_send = _dispatch_gate(
         hostname, port, path, body, "python_urllib"
     )
@@ -704,7 +725,7 @@ def _observe_urlopen(url, data=None, timeout=None, *args, **kwargs):
                 "python_urllib",
                 getattr(resp, "status", None) or getattr(resp, "code", None),
                 t0,
-                method="POST" if data is not None else "GET",
+                method=method,
                 path=path,
                 scheme=scheme,
             )
@@ -717,7 +738,7 @@ def _observe_urlopen(url, data=None, timeout=None, *args, **kwargs):
             t0,
             record_send=record_send,
             action="OBSERVED",
-            method="POST" if data is not None else "GET",
+            method=method,
             path=path,
             scheme=scheme,
         )
@@ -736,6 +757,7 @@ def _observe_opener_open(self, fullurl, data=None, timeout=socket._GLOBAL_DEFAUL
     except Exception:
         scheme = "https"
     body = data if data is not None else getattr(fullurl, "data", None)
+    method = _urllib_method(fullurl, data)
     kind, payload, redactions, record_send = _dispatch_gate(
         hostname, port, path, body, "python_urllib"
     )
@@ -753,7 +775,7 @@ def _observe_opener_open(self, fullurl, data=None, timeout=socket._GLOBAL_DEFAUL
                 "python_urllib",
                 getattr(resp, "status", None) or getattr(resp, "code", None),
                 t0,
-                method="POST" if (data is not None or body is not None) else "GET",
+                method=method,
                 path=path,
                 scheme=scheme,
             )
@@ -766,7 +788,7 @@ def _observe_opener_open(self, fullurl, data=None, timeout=socket._GLOBAL_DEFAUL
             t0,
             record_send=record_send,
             action="OBSERVED",
-            method="POST" if (data is not None or body is not None) else "GET",
+            method=method,
             path=path,
             scheme=scheme,
         )
