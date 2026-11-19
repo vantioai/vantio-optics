@@ -1,6 +1,6 @@
 # Known limitations
 
-This page lists what Optics does not do, and the gaps that are easy to over-read. Versions checked on 2026-10-21: published CLI 0.3.24, source CLI 0.3.26 (not an npm release), published Python 3.1.1, source Python 3.1.2 (not a PyPI release). Coverage, new-destination, and export commands in this source tree are described below.
+This page lists what Optics does not do, and the gaps that are easy to over-read. Versions checked on 2026-11-19: published CLI 0.3.27 and published Python 3.1.2, the same as this source tree. Coverage, new-destination, and export commands are described below. Published npm CLI 0.3.24 does not include them.
 
 ## Absent on purpose in the current products
 
@@ -9,8 +9,8 @@ This page lists what Optics does not do, and the gaps that are easy to over-read
 | Enforcement, blocking, redaction, spend caps | Phantom Engine. Free Optics records `OBSERVED` and does not apply those controls. |
 | SQLite or any other database | Absent. One JSON file per trace id. |
 | `vantio ui`, `vantio doctor`, a resident daemon | Absent. |
-| New-destination flag | `vantio destinations` in this source tree flags the first connection from a program to a destination that is not on the allowlist. It does not stop the call and it does not page a person. Published npm CLI 0.3.24 does not include the command. |
-| OTLP export | `vantio export --otlp` sends OTLP/HTTP JSON. `vantio export --otlp-grpc` sends the same fields as unary gRPC over HTTP/2. Optics does not start a collector. Published npm CLI 0.3.24 does not include the command. |
+| New-destination flag | `vantio destinations` in this source tree flags the first connection from a program to a destination that is not on the allowlist. It does not stop the call and it does not page a person. Published since npm CLI 0.3.26. 0.3.24 does not include the command. |
+| OTLP export | `vantio export --otlp` sends OTLP/HTTP JSON. `vantio export --otlp-grpc` sends the same fields as unary gRPC over HTTP/2. Optics does not start a collector. Published since npm CLI 0.3.26. 0.3.24 does not include the command. |
 | Stable schema | Absent. Contract is `unstable-pre-1.0`. |
 | PKG-02 and any shared record vocabulary included as a runtime | Future work. Not in the CLI or the published SDK. |
 | Retention, prune, max size | Absent. Files stay until you delete them. |
@@ -44,7 +44,7 @@ Unsupported paths in [SUPPORTED-PATHS.md](SUPPORTED-PATHS.md) are unobserved. Th
 
 ## Telemetry gap between published packages
 
-CLI 0.3.24 and published Python 3.1.1 are opt-in (`VANTIO_TELEMETRY=1`). Python 3.0.14 `shield()` sends unless disabled with `VANTIO_TELEMETRY_DISABLED=1` or `DO_NOT_TRACK=1`. Describe the package the person installed. See [TELEMETRY.md](TELEMETRY.md).
+CLI 0.3.24 through 0.3.27 and published Python 3.1.1 and 3.1.2 are opt-in (`VANTIO_TELEMETRY=1`). Python 3.0.14 `shield()` sends unless disabled with `VANTIO_TELEMETRY_DISABLED=1` or `DO_NOT_TRACK=1`. Describe the package the person installed. See [TELEMETRY.md](TELEMETRY.md).
 
 The telemetry field `hosts` means customer LLM endpoint hostnames. On the CLI ping it is the first recorded call's hostname. On the Python `shield()` ping it is empty.
 

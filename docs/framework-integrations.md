@@ -266,7 +266,7 @@ asyncio.run(run())
 | CrewAI | Python | `@shield` around `crew.kickoff()` |
 | AutoGen / AG2 | Python | `@shield` around the initiate call |
 | Any Node.js agent | Node.js | `vantio run` (zero code changes) |
-| Any Python caller | Python | `pip install 'vantio-agent-sdk==3.1.1'` + `@shield` |
+| Any Python caller | Python | `pip install 'vantio-agent-sdk==3.1.2'` + `@shield` |
 
 ---
 

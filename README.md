@@ -15,7 +15,7 @@ These versions are what the public registries returned on 2026-11-19. Pin them. 
 | Package | Registry | Version | Install |
 | --- | --- | --- | --- |
 | `@vantio/cli` | npm | 0.3.27 | `npm install -g @vantio/cli@0.3.27` |
-| `vantio-agent-sdk` | PyPI | 3.1.1 | `pip install 'vantio-agent-sdk==3.1.1'` |
+| `vantio-agent-sdk` | PyPI | 3.1.2 | `pip install 'vantio-agent-sdk==3.1.2'` |
 | `@vantio/agent-sdk` | npm | 0.2.4 | `npm install @vantio/agent-sdk@0.2.4` |
 | `@vantio/optics-mcp` | npm | 0.1.2 | `npx -y @vantio/optics-mcp@0.1.2` |
 
@@ -23,7 +23,7 @@ These versions are what the public registries returned on 2026-11-19. Pin them. 
 
 `@vantio/cli` 0.3.27 is npm latest. It fixes two 0.3.26 bugs: `vantio run python` failed to install the Python wrap when `vantio-agent-sdk` was installed, and Node `http`/`https` calls showed no HTTP status. Do not pin 0.3.26.
 
-PyPI marks `vantio-agent-sdk` **3.1.2** as latest. The 3.1.1 pin above also works with CLI 0.3.27.
+PyPI marks `vantio-agent-sdk` **3.1.2** as latest. 3.1.1 also works with CLI 0.3.27.
 
 This tree's packages match the registry versions above. Build from this tree only when you mean to run this source.
 
@@ -40,7 +40,7 @@ vantio prove --format=md
 `vantio run` records supported Node calls (`node`, `npx`, `tsx`, `ts-node`) through the Node HTTP stack. It does not by itself record Python.
 
 ```bash
-pip install 'vantio-agent-sdk==3.1.1'
+pip install 'vantio-agent-sdk==3.1.2'
 vantio run python agent.py
 ```
 

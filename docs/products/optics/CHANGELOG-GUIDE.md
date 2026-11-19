@@ -7,7 +7,7 @@ This manual is version 1. It is a docs set. It does not bump `@vantio/cli`, `van
 | You installed | Read |
 | --- | --- |
 | `@vantio/cli@0.3.27` | The published CLI is 0.3.27, the same as this tree. Node pages that name 0.3.24 describe that older release. |
-| `vantio-agent-sdk==3.1.1` | [PYTHON-GUIDE.md](PYTHON-GUIDE.md) for the current PyPI release. |
+| `vantio-agent-sdk==3.1.2` | [PYTHON-GUIDE.md](PYTHON-GUIDE.md) for the current PyPI release. |
 | `vantio-agent-sdk==3.0.14` | The 3.0.14 sections of [PYTHON-GUIDE.md](PYTHON-GUIDE.md). That pin is older than PyPI latest. |
 | A checkout of this repository | `pyproject.toml` says 3.1.2. That string is source. `pip install` does not install it. |
 

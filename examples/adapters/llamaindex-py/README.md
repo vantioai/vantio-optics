@@ -3,7 +3,7 @@
 LlamaIndex uses `httpx` — use the Python SDK `@shield` decorator (same as LangChain Python).
 
 ```bash
-pip install 'vantio-agent-sdk==3.1.1' llama-index
+pip install 'vantio-agent-sdk==3.1.2' llama-index
 ```
 
 ```python

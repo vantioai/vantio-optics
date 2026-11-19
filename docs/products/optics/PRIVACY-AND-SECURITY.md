@@ -4,13 +4,17 @@ Optics stores structural metadata about supported outbound calls. The design goa
 
 ## Stored on the free path
 
-For a recorded call, the Node 0.3.24 file can contain hostname, provider guess, method, URL path, scheme, request size, response size, HTTP status, `ok`, content-type media type, duration, action `OBSERVED`, timestamp, a redaction count (zero in free mode), and an error class name on network failure. The envelope adds trace id, pid, ppid, Node version, platform, arch, start and end times, duration, CLI version, and summary counts.
+For a recorded call, the Node 0.3.24 through 0.3.27 file can contain hostname, provider guess, method, URL path, scheme, request size, response size, HTTP status, `ok`, content-type media type, duration, action `OBSERVED`, timestamp, a redaction count (zero in free mode), and an error class name on network failure. The envelope adds trace id, pid, ppid, Node version, platform, arch, start and end times, duration, CLI version, and summary counts.
+
+CLI 0.3.27 also writes these envelope fields: `program` (the script file name, such as `agent.js`), `system_hostname` (the machine's hostname), `processes` (pid, parent pid and program name for each recorded process), and `socket_observation`. Each call has a `mediation` field. For `node:http`, `node:https` and `node:http2` calls, 0.3.27 records the method, the path without its query string, and the HTTP status. 0.3.24 recorded those calls as method `REQUEST` with no status.
 
 Published Python 3.0.14 stores a smaller call object: hostname, provider `"other"`, action, mediation, timestamp, and the extras that hook recorded (path, status, ok, duration, error name). The envelope has no pid. See [RECORD-REFERENCE.md](RECORD-REFERENCE.md).
 
 Response size on Node is `Content-Length` when the header exists. A missing header leaves the size empty or zero depending on the path. Streaming byte totals in a control-plane branch are outside free Optics.
 
 A local check on 2026-09-27 posted a prompt canary and a query token to a loopback server through `vantio run node` (CLI 0.3.24) and through `vantio run python3` with published `vantio-agent-sdk==3.0.14`. The run files contained the path and the host. They did not contain the prompt, the query token, or the response body.
+
+The same check was repeated on 2026-11-19 with npm CLI 0.3.27. Node used `http.request` and `fetch`, and Python used `vantio-agent-sdk==3.1.2` with `urllib` and `requests`. `runs/*.json`, `live.jsonl` and `seen-destinations.json` contained none of the prompt canary, the query-string canary, or the response-body canary. Paths were stored without the query string.
 
 ## Absent from the free record
 
@@ -66,7 +70,7 @@ MCP `optics_prove` Markdown can include action, method, and path, and can print 
 
 The usage ping is a separate channel. Read [TELEMETRY.md](TELEMETRY.md) before you answer "does Optics phone home?"
 
-Short form: CLI 0.3.24 does not send unless `VANTIO_TELEMETRY=1`. Published Python 3.0.14 `shield()` does send unless `VANTIO_TELEMETRY_DISABLED=1` or `DO_NOT_TRACK=1`. The field `hosts` on that ping lists customer LLM endpoint hostnames, not prompts.
+Short form: CLI 0.3.24 through 0.3.27 does not send unless `VANTIO_TELEMETRY=1`. Published Python 3.0.14 `shield()` does send unless `VANTIO_TELEMETRY_DISABLED=1` or `DO_NOT_TRACK=1`. The field `hosts` on that ping lists customer LLM endpoint hostnames, not prompts.
 
 ## Control plane
 

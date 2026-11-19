@@ -74,7 +74,7 @@ Wrap a Node process with `vantio run`. The CLI intercepts outbound calls to know
 Python is not wrapped by this interceptor. Install [`vantio-agent-sdk`](https://pypi.org/project/vantio-agent-sdk) on that interpreter first, then:
 
 ```bash
-pip install 'vantio-agent-sdk==3.1.1'
+pip install 'vantio-agent-sdk==3.1.2'
 vantio run python agent.py
 ```
 
@@ -162,7 +162,7 @@ vantio discover --local
 vantio discover --local --since=7d --json
 ```
 
-`vantio discover` reads `~/.vantio/runs` on this machine. That is only processes started with `vantio run` (Node) or `vantio run python` after `pip install 'vantio-agent-sdk==3.1.1'`. It is this machine only — not a fleet inventory and not a scan of every process. curl, browsers, skipped wraps, and forks stay outside this list. `--local` is accepted and does not change that behavior.
+`vantio discover` reads `~/.vantio/runs` on this machine. That is only processes started with `vantio run` (Node) or `vantio run python` after `pip install 'vantio-agent-sdk==3.1.2'`. It is this machine only — not a fleet inventory and not a scan of every process. curl, browsers, skipped wraps, and forks stay outside this list. `--local` is accepted and does not change that behavior.
 
 **Options:**
 

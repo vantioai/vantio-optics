@@ -7,12 +7,14 @@ Use the row for the package you installed. Checked on 2026-10-21.
 | Package | When a ping is sent |
 | --- | --- |
 | `@vantio/cli@0.3.27` (npm latest) | Only when `VANTIO_TELEMETRY=1`. `VANTIO_TELEMETRY_DISABLED=1` or `DO_NOT_TRACK=1` keeps it off, including when opt-in is set. |
-| `vantio-agent-sdk==3.1.1` (PyPI latest) | Same opt-in rule as the CLI. The 3.1.1 wheel's `vantio/_telemetry.py` matches this tree. |
+| `vantio-agent-sdk==3.1.2` (PyPI latest) | Same opt-in rule as the CLI. The 3.1.1 and 3.1.2 wheels have the same `vantio/_telemetry.py`, which matches this tree. |
 | `vantio-agent-sdk==3.0.14` (older pin) | `shield()` sends unless `VANTIO_TELEMETRY_DISABLED=1` or `DO_NOT_TRACK=1`. That release does not consult `VANTIO_TELEMETRY`. |
 
 `vantio status` prints the CLI posture for the current environment: `off`, `opt-in`, or `disabled`. It does not show whether a previous ping succeeded.
 
-## CLI 0.3.24
+## CLI 0.3.24 through 0.3.27
+
+`bin/telemetry.cjs` is byte-identical in npm CLI 0.3.24 and 0.3.27, checked 2026-11-19.
 
 Default is off. Nothing is sent for `vantio --help`, `vantio --version`, `vantio status`, `vantio demo`, or a run that records no call.
 
@@ -66,7 +68,7 @@ The sender builds a fixed allowlist. Fields outside the list are not added.
 | `runtimeVersion` | Node version string, or `platform.python_version()`. |
 | `os` | `process.platform` or `sys.platform`. |
 | `event` | `run` for this automatic ping. Other values are sent as `summary` if a caller passes them. |
-| `hosts` | Customer LLM endpoint hostnames the event includes, at most 50 strings. CLI 0.3.24 sends the hostname of the first recorded in-scope call, as a one-element list. The Python `shield()` ping sends an empty list because it runs before observations. These are the API hostnames the agent contacted, such as `api.openai.com`. They are not prompts. |
+| `hosts` | Customer LLM endpoint hostnames the event includes, at most 50 strings. CLI 0.3.24 through 0.3.27 sends the hostname of the first recorded in-scope call, as a one-element list. The Python `shield()` ping sends an empty list because it runs before observations. These are the API hostnames the agent contacted, such as `api.openai.com`. They are not prompts. |
 | `callCount` | CLI: number of completed in-scope call records at send time. The first completed call reports 1. Python `shield()` ping: 0. |
 
 Optional fields, included only when the caller sets them: `sdkVersion`, `cliVersion`, `redactedCount`, `blockedCount`, `framework`. The CLI automatic ping sets `cliVersion`. The Python automatic ping sets `sdkVersion` when import succeeds.

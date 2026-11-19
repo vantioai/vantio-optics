@@ -5,7 +5,7 @@
 | Package | Install | Published on 2026-10-21 | In this git tree |
 | --- | --- | --- | --- |
 | CLI | `npm install -g @vantio/cli@0.3.27` | 0.3.27 | 0.3.27 |
-| Python | `pip install 'vantio-agent-sdk==3.1.1'` | 3.1.1 | 3.1.2 |
+| Python | `pip install 'vantio-agent-sdk==3.1.2'` | 3.1.2 | 3.1.2 |
 
 Do not bump package versions as part of reading this manual. This manual does not publish anything.
 
@@ -52,7 +52,7 @@ There is no negotiation and no refusal of a newer file. Restoring an older CLI k
 ```bash
 # Example status: illustrative
 npm install -g @vantio/cli@0.3.27
-pip install 'vantio-agent-sdk==3.1.1'
+pip install 'vantio-agent-sdk==3.1.2'
 ```
 
 To return to the older Python release, pin `vantio-agent-sdk==3.0.14`. That pin is not the current PyPI release.

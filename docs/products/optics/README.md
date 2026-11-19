@@ -123,7 +123,7 @@ No PDF is produced with this manual. This repository has no documentation render
 ## Public-safety notes for review
 
 - Optics records supported calls. A path with no record was not observed. It was not blocked by Optics.
-- Published Python 3.1.1 and CLI 0.3.24 stay silent unless `VANTIO_TELEMETRY=1`. `VANTIO_TELEMETRY_DISABLED=1` or `DO_NOT_TRACK=1` keeps the ping off. Python 3.0.14, an older pin, sends from `shield()` unless one of those two overrides is set. See [TELEMETRY.md](TELEMETRY.md).
+- Published Python 3.1.1 and 3.1.2 and CLI 0.3.24 through 0.3.27 stay silent unless `VANTIO_TELEMETRY=1`. `VANTIO_TELEMETRY_DISABLED=1` or `DO_NOT_TRACK=1` keeps the ping off. Python 3.0.14, an older pin, sends from `shield()` unless one of those two overrides is set. See [TELEMETRY.md](TELEMETRY.md).
 - Any sentence about the telemetry field `hosts` means customer LLM endpoint hostnames. See [TELEMETRY.md](TELEMETRY.md).
 - Published Python run files still contain the string `sight_loop` in `workflow`. That string is leftover storage. It is not the product name. The product name is Vantio Optics.
-- SQLite, a `vantio ui` interface, a stable schema, and PKG-02 are absent. `vantio coverage`, `vantio destinations`, and `vantio export` are in this source tree and are absent from published npm CLI 0.3.24. See [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md).
+- SQLite, a `vantio ui` interface, a stable schema, and PKG-02 are absent. `vantio coverage`, `vantio destinations`, and `vantio export` are in published npm CLI 0.3.27 and absent from 0.3.24. See [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md).

@@ -2,7 +2,7 @@
 
 Optics is local. A fresh CLI install needs no account and no API key. The record is metadata: host, size, timing, and process. Prompts and completions are absent from the record.
 
-Versions, checked on 2026-11-19: install `@vantio/cli@0.3.27` and, for Python, `vantio-agent-sdk==3.1.1` or `3.1.2`. This git tree is CLI 0.3.27 and Python 3.1.2. Details: [INSTALLATION.md](INSTALLATION.md).
+Versions, checked on 2026-11-19: install `@vantio/cli@0.3.27` and, for Python, `vantio-agent-sdk==3.1.2`. This git tree is CLI 0.3.27 and Python 3.1.2. Details: [INSTALLATION.md](INSTALLATION.md).
 
 ## 1. Install the CLI
 
@@ -46,7 +46,7 @@ Install the published SDK on the same interpreter you run:
 
 ```bash
 # Example status: illustrative
-pip install 'vantio-agent-sdk==3.1.1'
+pip install 'vantio-agent-sdk==3.1.2'
 vantio run python agent.py
 ```
 
