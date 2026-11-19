@@ -52,6 +52,9 @@ Flags (run):
   --summary, -s   Print a run summary on exit.
   --json          Unstable JSON on stdout when the program exits.
   --mcp-enforce   Opt in to in-process MCP withhold. Default is observe and log.
+                  Applies only inside the program vantio run starts and its
+                  Node or Python children. If the library does not load,
+                  Node runs without it.
 
 --json output includes "schema_status": "unstable-pre-1.0" and may change without notice.
 
@@ -108,9 +111,9 @@ Examples:
 `;
 
 const PROVE_HELP = `\
-vantio prove — local proof artifacts
+vantio prove — local run reports
 
-Generates a local proof artifact (HTML or Markdown report) from a
+Generates an unsigned local report (HTML or Markdown) from a
 vantio run log. Reports include: trace ID, PID, byte counts, host
 breakdown, and summary counts. Prompts and completions are never stored.
 

@@ -94,7 +94,7 @@ vantio run --json node agent.js      # unstable JSON run record on stdout
 vantio run --mcp-enforce node agent.js
 ```
 
-`vantio run` loads in-process MCP awareness for Node, and the same library for Python child-process stdio. The default is observe, and injection and rug-pull stay on log. `--mcp-enforce` withholds inside that process. `VANTIO_MCP_AWARENESS=off` does not load it. The path does not add a proxy process. Payload text is not stored. This is not Phantom Engine. Host attachment remains a later step.
+`vantio run` loads in-process MCP awareness for Node, and the same library for Python child-process stdio. The default is observe, and injection and rug-pull stay on log. `--mcp-enforce` withholds only inside the program `vantio run` starts, and inside Node or Python children that inherit its environment. It does not reach other processes on the host. If the library does not load, Node runs the program without it (fails open), and the `[ ∅ VANTIO ] mcp awareness` banner does not print. `VANTIO_MCP_AWARENESS=off` does not load it. The path does not add a proxy process. Payload text is not stored. This is not Phantom Engine. Host attachment remains a later step.
 
 **`--json`** on `run`, `demo`, `status`, `discover`, `prove`, `search`, `tail`, `diff`, `coverage`, `destinations`, and `export` prints `"schema_status": "unstable-pre-1.0"`. That shape may change without notice. Field mapping to OpenTelemetry GenAI terms is documented in [docs/optics-otel-mapping.md](../../docs/optics-otel-mapping.md). `vantio export --otlp` sends OTLP/HTTP JSON. `vantio export --otlp-grpc` sends the same fields as unary OTLP/gRPC over HTTP/2. Optics does not start a collector.
 
@@ -113,7 +113,7 @@ Intercepted calls print to the terminal in real time.
 
 ---
 
-## vantio prove — proof artifacts
+## vantio prove — local run reports
 
 ```bash
 vantio prove                           # HTML report — most recent run
@@ -124,7 +124,7 @@ vantio prove --format=html --out=proof.html
 ```
 
 `vantio prove` reads the run logs that `vantio run` automatically writes to
-`~/.vantio/runs/` and generates a self-contained proof document. Reports include
+`~/.vantio/runs/` and generates an unsigned local report. The report is not signed, so it is not proof on its own. Reports include
 trace IDs, process IDs, byte counts, host breakdown, and action labels.
 
 Prompts and completions are never stored.
