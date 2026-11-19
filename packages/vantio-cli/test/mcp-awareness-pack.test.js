@@ -174,3 +174,40 @@ test("python vantio run observes and can enforce without storing the canary", as
     rmSync(home, { recursive: true, force: true });
   }
 });
+
+test("python vantio run installs the SDK wrap alongside MCP awareness", async () => {
+  // Regression: MCP awareness replaced subprocess.Popen with a function, so
+  // vantio-agent-sdk's `class _VantioPopen(subprocess.Popen)` raised TypeError
+  // and the Python wrap never installed.
+  const sdkDir = join(CLI_DIR, "..", "vantio-agent-sdk-py");
+  const home = mkdtempSync(join(tmpdir(), "vantio-py-sdk-"));
+  const agent = join(home, "agent.py");
+  writeFileSync(
+    agent,
+    [
+      "import subprocess",
+      "assert isinstance(subprocess.Popen, type)",
+      "subprocess.Popen[bytes]",
+      // Negative case: a failed spawn still raises through the wrapper.
+      "try:",
+      "    subprocess.Popen(['vantio-no-such-binary-7f2c'])",
+      "    raise SystemExit('spawn of a missing binary did not raise')",
+      "except FileNotFoundError:",
+      "    pass",
+      "print('ok')",
+      "",
+    ].join("\n"),
+  );
+  try {
+    const result = await runCli(CLI_PATH, ["run", "python3", agent], {
+      HOME: home,
+      PYTHONPATH: sdkDir,
+    });
+    assert.equal(result.code, 0, `${result.stderr}\n${result.stdout}`);
+    assert.match(result.stderr, /mcp awareness mode=observe/);
+    assert.doesNotMatch(result.stderr, /did not install/);
+    assert.match(result.stdout, /ok/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
