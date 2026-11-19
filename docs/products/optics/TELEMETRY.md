@@ -6,7 +6,7 @@ Use the row for the package you installed. Checked on 2026-10-21.
 
 | Package | When a ping is sent |
 | --- | --- |
-| `@vantio/cli@0.3.24` (npm latest) | Only when `VANTIO_TELEMETRY=1`. `VANTIO_TELEMETRY_DISABLED=1` or `DO_NOT_TRACK=1` keeps it off, including when opt-in is set. |
+| `@vantio/cli@0.3.27` (npm latest) | Only when `VANTIO_TELEMETRY=1`. `VANTIO_TELEMETRY_DISABLED=1` or `DO_NOT_TRACK=1` keeps it off, including when opt-in is set. |
 | `vantio-agent-sdk==3.1.1` (PyPI latest) | Same opt-in rule as the CLI. The 3.1.1 wheel's `vantio/_telemetry.py` matches this tree. |
 | `vantio-agent-sdk==3.0.14` (older pin) | `shield()` sends unless `VANTIO_TELEMETRY_DISABLED=1` or `DO_NOT_TRACK=1`. That release does not consult `VANTIO_TELEMETRY`. |
 

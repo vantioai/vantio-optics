@@ -12,12 +12,12 @@ Checked against the public registries on 2026-10-21.
 
 | Package | What a fresh install returns | What this source tree contains |
 | --- | --- | --- |
-| `@vantio/cli` (npm) | **0.3.24** | **0.3.26**. `npm install -g @vantio/cli` installs 0.3.24. |
+| `@vantio/cli` (npm) | **0.3.27** | **0.3.27**. `npm install -g @vantio/cli` installs 0.3.27 (npm latest on 2026-11-19). |
 | `vantio-agent-sdk` (PyPI) | **3.1.1** | **3.1.2**. `pip install vantio-agent-sdk` installs 3.1.1. |
 | `@vantio/agent-sdk` (npm) | **0.2.4** | **0.2.4**. This package does not write `~/.vantio/runs`. |
 | `@vantio/optics-mcp` (npm) | **0.1.2** | **0.1.2**. Read-only local log reader. |
 
-Published CLI behavior below is 0.3.24 unless a sentence names this source tree. Published Python behavior for an unpinned install is 3.1.1. Pages that name Python 3.0.14 describe that older release, which is still on PyPI if you pin it. They are not what `pip install vantio-agent-sdk` returns. The 3.1.1 wheel's telemetry module matches this tree. `vantio/_http_observe.py` in this tree does not match that wheel.
+Published CLI behavior below was written against 0.3.24 unless a sentence names this source tree. The current npm release is 0.3.27, which adds `vantio coverage`, `vantio destinations`, and `vantio export`, and records HTTP status for Node `http`/`https`/`http2` calls. Published Python behavior for an unpinned install is 3.1.1. Pages that name Python 3.0.14 describe that older release, which is still on PyPI if you pin it. They are not what `pip install vantio-agent-sdk` returns. The 3.1.1 wheel's telemetry module matches this tree. `vantio/_http_observe.py` in this tree does not match that wheel.
 
 An earlier pass of this manual, dated 2026-09-27, recorded Python 3.0.14 as the PyPI release. That is no longer the latest release.
 

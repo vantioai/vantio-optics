@@ -6,10 +6,10 @@ Use this file before answering questions about Vantio Optics. The version-matche
 
 | Install command people actually run | Version you may describe as installed |
 | --- | --- |
-| `npm install -g @vantio/cli` | `@vantio/cli@0.3.24` (npm latest on 2026-10-21) |
+| `npm install -g @vantio/cli` | `@vantio/cli@0.3.27` (npm latest on 2026-11-19) |
 | `pip install vantio-agent-sdk` | `vantio-agent-sdk==3.1.1` (PyPI latest on 2026-10-21) |
 
-This git tree contains CLI **0.3.26** and Python **3.1.2**. Neither is what those install commands return. Describe 0.3.26 and 3.1.2 only as source. Published CLI 0.3.24 is the CLI you may describe for `npm install -g @vantio/cli`: do not invent later CLI flags as part of that package. Python 3.0.14 is an older pin, not the unpinned install.
+This git tree contains CLI **0.3.27** and Python **3.1.2**, the same versions the registries serve. Describe only commands in `vantio --help` for 0.3.27 as part of `npm install -g @vantio/cli`. Python 3.0.14 is an older pin, not the unpinned install.
 
 `contract_version` is `unstable-pre-1.0`. Command `--json` output carries `schema_status` `unstable-pre-1.0` and may change. There is no stable public schema.
 

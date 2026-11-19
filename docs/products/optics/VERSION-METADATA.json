@@ -3,7 +3,7 @@
   "manual_version": 1,
   "audience": "public",
   "contract_version": "unstable-pre-1.0",
-  "registry_checked_utc": "2026-10-21T18:19:00Z",
+  "registry_checked_utc": "2026-11-19T05:40:00Z",
   "copied_from": {
     "repository": "https://github.com/vantioai/vantio-open-core",
     "commit": "75f32310d03a3020b56fd565109ae1f2a19a23bc",
@@ -11,25 +11,24 @@
   },
   "registry": {
     "npm": {
-      "@vantio/cli": "0.3.24",
+      "@vantio/cli": "0.3.27",
       "@vantio/agent-sdk": "0.2.4",
       "@vantio/optics-mcp": "0.1.2"
     },
     "pypi": {
-      "vantio-agent-sdk": "3.1.1"
+      "vantio-agent-sdk": "3.1.2"
     }
   },
   "source_tree": {
-    "@vantio/cli": "0.3.26",
+    "@vantio/cli": "0.3.27",
     "vantio-agent-sdk": "3.1.2",
     "@vantio/agent-sdk": "0.2.4",
     "@vantio/optics-mcp": "0.1.2"
   },
   "notes": [
-    "Unpinned npm install -g @vantio/cli resolves to 0.3.24.",
-    "Unpinned pip install vantio-agent-sdk resolves to 3.1.1.",
-    "Published 3.1.1 vantio/_telemetry.py matches this tree. vantio/_http_observe.py does not.",
-    "Python 3.0.14 remains on PyPI and is not the latest release.",
-    "@vantio/cli 0.3.24 has registry signatures and no provenance attestation."
+    "Unpinned npm install -g @vantio/cli resolves to 0.3.27.",
+    "Unpinned pip install vantio-agent-sdk resolves to 3.1.2.",
+    "Python 3.0.14 and 3.1.1 remain on PyPI and are not the latest release.",
+    "@vantio/cli 0.3.27 has registry signatures and no provenance attestation. Its registry tarball is byte-identical to open-core artifacts/sealed/vantio-cli-0.3.27.tgz."
   ]
 }

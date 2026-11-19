@@ -15,7 +15,7 @@ Observe-only **Vantio Optics** commands for VS Code. Thin wrappers over the Vant
 ## Requirements
 
 ```bash
-npm install -g @vantio/cli@0.3.24
+npm install -g @vantio/cli@0.3.27
 ```
 
 0.3.24 is the npm release checked on 2026-10-21.

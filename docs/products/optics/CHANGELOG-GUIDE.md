@@ -6,7 +6,7 @@ This manual is version 1. It is a docs set. It does not bump `@vantio/cli`, `van
 
 | You installed | Read |
 | --- | --- |
-| `@vantio/cli@0.3.24` | The published CLI is 0.3.24. Node pages that do not name a later source version match that package. This tree is 0.3.26. |
+| `@vantio/cli@0.3.27` | The published CLI is 0.3.27, the same as this tree. Node pages that name 0.3.24 describe that older release. |
 | `vantio-agent-sdk==3.1.1` | [PYTHON-GUIDE.md](PYTHON-GUIDE.md) for the current PyPI release. |
 | `vantio-agent-sdk==3.0.14` | The 3.0.14 sections of [PYTHON-GUIDE.md](PYTHON-GUIDE.md). That pin is older than PyPI latest. |
 | A checkout of this repository | `pyproject.toml` says 3.1.2. That string is source. `pip install` does not install it. |
@@ -23,7 +23,7 @@ Package changelogs live next to the packages (`packages/vantio-agent-sdk-py/CHAN
 
 ## CLI history that still affects support
 
-`0.3.24` is the current public CLI. It is free, local, and account-free. `vantio login` is not part of the help surface. `vantio logout` only deletes a leftover `config.json`.
+`0.3.27` is the current public CLI. It fixes Python wrap installation with `vantio-agent-sdk` and records HTTP status for Node `http`/`https`/`http2` calls. `0.3.24` was the public CLI before 0.3.26. It is free, local, and account-free. `vantio login` is not part of the help surface. `vantio logout` only deletes a leftover `config.json`.
 
 Command `--json` output includes `schema_status` `unstable-pre-1.0`. That line means the JSON may change. It does not mean the Node run file contains `schema_status`. The Node run file does not.
 

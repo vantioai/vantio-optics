@@ -2,7 +2,7 @@
 
 Optics is local. A fresh CLI install needs no account and no API key. The record is metadata: host, size, timing, and process. Prompts and completions are absent from the record.
 
-Versions, checked on 2026-10-21: install `@vantio/cli@0.3.24` and, for Python, `vantio-agent-sdk==3.1.1`. This git tree is CLI 0.3.26 and Python 3.1.2. Details: [INSTALLATION.md](INSTALLATION.md).
+Versions, checked on 2026-11-19: install `@vantio/cli@0.3.27` and, for Python, `vantio-agent-sdk==3.1.1` or `3.1.2`. This git tree is CLI 0.3.27 and Python 3.1.2. Details: [INSTALLATION.md](INSTALLATION.md).
 
 ## 1. Install the CLI
 
@@ -12,7 +12,7 @@ npm install -g @vantio/cli
 vantio --version
 ```
 
-`vantio --version` prints the installed CLI version. For this manual that version is `0.3.24`.
+`vantio --version` prints the installed CLI version. For this manual that version is `0.3.27`.
 
 There is no `https://vantio.ai/install.sh` installer. Node.js 18.3 or newer is required by the CLI package.
 

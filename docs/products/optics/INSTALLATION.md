@@ -7,15 +7,15 @@ Free Optics needs no account and no API key. The CLI does not read a saved key f
 | Item | Value |
 | --- | --- |
 | Package | `@vantio/cli` |
-| Public version | `0.3.24` (npm latest on 2026-10-21) |
-| Source in this commit | `0.3.26`, not the npm package |
+| Public version | `0.3.27` (npm latest on 2026-11-19) |
+| Source in this commit | `0.3.27`, the same bytes as the npm package |
 | Command | `vantio` |
 | Engine | Node.js `>=18.3.0` |
 | License | MIT |
 
 ```bash
 # Example status: illustrative
-npm install -g @vantio/cli@0.3.24
+npm install -g @vantio/cli@0.3.27
 vantio --version
 ```
 
