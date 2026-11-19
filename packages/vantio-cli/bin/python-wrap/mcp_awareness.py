@@ -32,15 +32,17 @@ def install() -> None:
     )
     original = subprocess.Popen
 
-    def wrapped(*args, **kwargs):
-        proc = original(*args, **kwargs)
-        try:
-            _attach(proc, args, original)
-        except Exception:
-            pass
-        return proc
+    # A subclass, not a function: other code (vantio-agent-sdk, typing's
+    # subprocess.Popen[bytes], isinstance checks) needs Popen to stay a class.
+    class _AwarePopen(original):  # type: ignore[misc,valid-type]
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            try:
+                _attach(self, args, original)
+            except Exception:
+                pass
 
-    subprocess.Popen = wrapped  # type: ignore[misc]
+    subprocess.Popen = _AwarePopen  # type: ignore[misc]
 
 
 def _attach(proc: subprocess.Popen, args: tuple, original) -> None:
