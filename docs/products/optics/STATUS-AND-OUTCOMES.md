@@ -1,8 +1,8 @@
 # Status and outcomes
 
-CLI 0.3.24 prints two different ideas. Keep the tokens.
+CLI 0.3.24 through 0.3.27 prints two different ideas. `bin/optics-cx.cjs`, which holds these labels, is byte-identical in both, checked 2026-11-19. Keep the tokens.
 
-| Token | Human label in CLI 0.3.24 | Use |
+| Token | Human label in CLI 0.3.24 to 0.3.27 | Use |
 | --- | --- | --- |
 | `OBSERVED` | Observed | Stored `action` on a free Optics call. The call was recorded. |
 | `SUCCESS` | Successful | Optics status when a call record exists, or a single application outcome for HTTP 200–399. |

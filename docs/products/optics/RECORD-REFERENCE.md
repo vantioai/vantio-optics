@@ -78,6 +78,21 @@ Missing values become null or zero in this mapper. Free-mode `action` is `OBSERV
 
 The envelope has no `machine`, no span id, no session id, and no evidence-origin field.
 
+
+## Node 0.3.27 additions
+
+Checked on 2026-11-19 by running the same `https.get` agent under npm CLI 0.3.24 and 0.3.27. 0.3.27 keeps every 0.3.24 envelope and call key, keeps `vantio_run_log` `"1"` and `schema_version` `2`, and adds:
+
+| Field | Level | Example |
+| --- | --- | --- |
+| `program` | envelope | `"agent.js"` |
+| `system_hostname` | envelope | machine hostname |
+| `processes` | envelope | `[{"pid": 6931, "ppid": 6924, "program": "node"}]` |
+| `socket_observation` | envelope | `"read_only_proc"` |
+| `mediation` | call | `null` on a free-mode `node:https` call |
+
+For `node:http`, `node:https` and `node:http2` calls, 0.3.27 fills `method`, `path` (no query string), `status`, `ok` from the status, `content_type`, `bytes` from `Content-Length`, and `duration_ms`. A request that fails before a response sets `ok: false`, `error` to the error code, and `error_class`. 0.3.24 wrote `method: "REQUEST"`, `path: null`, `status: null` and `ok: true` for the same calls.
+
 ## Published Python 3.0.14 envelope
 
 | Field | Value |

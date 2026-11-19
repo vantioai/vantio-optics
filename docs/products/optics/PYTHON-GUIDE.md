@@ -17,7 +17,7 @@ Registry check: 2026-10-21. The unpinned install is 3.1.1. This git tree is 3.1.
 
 ```bash
 # Example status: illustrative
-pip install 'vantio-agent-sdk==3.1.1'
+pip install 'vantio-agent-sdk==3.1.2'
 ```
 
 Requires Python 3.10 or newer. Core observe uses the standard library. `requests`, `httpx`, `aiohttp`, `urllib3`, and `pycurl` are observed when they are already installed. They are not required dependencies.

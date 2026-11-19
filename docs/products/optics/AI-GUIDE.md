@@ -7,7 +7,7 @@ Use this file before answering questions about Vantio Optics. The version-matche
 | Install command people actually run | Version you may describe as installed |
 | --- | --- |
 | `npm install -g @vantio/cli` | `@vantio/cli@0.3.27` (npm latest on 2026-11-19) |
-| `pip install vantio-agent-sdk` | `vantio-agent-sdk==3.1.1` (PyPI latest on 2026-10-21) |
+| `pip install vantio-agent-sdk` | `vantio-agent-sdk==3.1.2` (PyPI latest on 2026-11-19) |
 
 This git tree contains CLI **0.3.27** and Python **3.1.2**, the same versions the registries serve. Describe only commands in `vantio --help` for 0.3.27 as part of `npm install -g @vantio/cli`. Python 3.0.14 is an older pin, not the unpinned install.
 
@@ -17,13 +17,13 @@ Read [VERSION-METADATA.json](VERSION-METADATA.json) and the page that matches th
 
 ## Commands
 
-Describe a command only when it appears in this manual or in `vantio --help` for CLI 0.3.24. The help commands are:
+Describe a command only when it appears in this manual or in `vantio --help` for CLI 0.3.27. The help commands are:
 
 `run`, `demo`, `status`, `discover`, `prove`, `search`, `tail`, `diff`.
 
 `vantio logout` exists and is omitted from help. It deletes `~/.vantio/config.json` only. It does not delete run logs.
 
-Do not invent `vantio ui`, `vantio doctor`, a daemon, a prune command, or an import command. `vantio coverage`, `vantio destinations`, and `vantio export` are in this source tree. They are not in published npm CLI 0.3.24.
+Do not invent `vantio ui`, `vantio doctor`, a daemon, a prune command, or an import command. `vantio coverage`, `vantio destinations`, and `vantio export` are in published npm CLI 0.3.27. They are not in 0.3.24.
 
 ## What Optics does
 
@@ -45,7 +45,7 @@ If a field is absent, say it is absent. Do not fill `machine`, span id, or evide
 
 ## Telemetry
 
-CLI 0.3.24 sends a usage ping only when `VANTIO_TELEMETRY=1`, and stays silent when `VANTIO_TELEMETRY_DISABLED=1` or `DO_NOT_TRACK=1`.
+CLI 0.3.24 through 0.3.27 sends a usage ping only when `VANTIO_TELEMETRY=1`, and stays silent when `VANTIO_TELEMETRY_DISABLED=1` or `DO_NOT_TRACK=1`.
 
 Published Python 3.0.14 is different. `shield()` sends the ping unless `VANTIO_TELEMETRY_DISABLED=1` or `DO_NOT_TRACK=1`. `VANTIO_TELEMETRY=1` is not required on that published package. Unpublished 3.1.0 source uses the CLI opt-in rule. Do not tell a person on 3.0.14 that the ping is off by default.
 
@@ -55,7 +55,7 @@ When you mention the payload field `hosts`, say it lists customer LLM endpoint h
 
 Do not claim Optics stores prompts, completions, or request bodies on the free path. Query strings are dropped. Path segments can still contain secrets if the application put them there.
 
-Do not claim SQLite, a stable schema, or PKG-02. Do not claim OTLP/gRPC or a collector started by Optics. Coverage, new-destination, and export commands in this source tree are absent from published npm CLI 0.3.24.
+Do not claim SQLite, a stable schema, or PKG-02. Do not claim OTLP/gRPC or a collector started by Optics. Coverage, new-destination, and export commands are in published npm CLI 0.3.27 and absent from 0.3.24.
 
 Python files may contain `"workflow": "sight_loop"`. That stored string is not current product terminology. The product name is Vantio Optics. Do not explain the product as Sight Loop.
 

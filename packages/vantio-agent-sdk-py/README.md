@@ -7,7 +7,7 @@ Optics helps you see. [Phantom Engine](https://vantio.ai/phantom) is runtime pro
 > **Optics** (Free) · **Phantom Engine** (Contact Vantio) · **Enterprise** (Contact Vantio)
 
 ```bash
-pip install 'vantio-agent-sdk==3.1.1'
+pip install 'vantio-agent-sdk==3.1.2'
 ```
 
 3.1.1 is the PyPI release checked on 2026-10-21. This directory's `pyproject.toml` is 3.1.2.
@@ -15,7 +15,7 @@ pip install 'vantio-agent-sdk==3.1.1'
 Prefixing `vantio run python` without this SDK does not intercept. Python support requires `vantio-agent-sdk`. Follow the current Python SDK example and verify that a supported outbound event appears before relying on the coverage state.
 
 ```bash
-pip install 'vantio-agent-sdk==3.1.1'
+pip install 'vantio-agent-sdk==3.1.2'
 vantio run python agent.py
 ```
 

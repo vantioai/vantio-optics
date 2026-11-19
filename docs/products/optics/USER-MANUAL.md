@@ -6,7 +6,7 @@ Optics is free, local-first observability for supported AI traffic. It records t
 
 Optics observes. Phantom Engine is the separate product that enforces. This manual stops at Optics.
 
-The installable versions on 2026-10-21 are `@vantio/cli@0.3.27` and `vantio-agent-sdk==3.1.1`. This source tree is CLI 0.3.26 and Python 3.1.2. See [VERSION-METADATA.json](VERSION-METADATA.json).
+The installable versions on 2026-11-19 are `@vantio/cli@0.3.27` and `vantio-agent-sdk==3.1.2`, the same as this source tree. See [VERSION-METADATA.json](VERSION-METADATA.json).
 
 ## Who this is for
 
@@ -16,7 +16,7 @@ The installable versions on 2026-10-21 are `@vantio/cli@0.3.27` and `vantio-agen
 
 **Support.** Start with `vantio --version` and the Python version print in [TROUBLESHOOTING.md](TROUBLESHOOTING.md). Status tokens are in [STATUS-AND-OUTCOMES.md](STATUS-AND-OUTCOMES.md).
 
-**Evaluator.** Published npm CLI 0.3.24 is local metadata on supported paths, plus local commands over those files. This source tree also has `vantio coverage`, `vantio destinations`, and `vantio export`. SQLite, a UI, and a stable schema are not included. [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md).
+**Evaluator.** Published npm CLI 0.3.27 is local metadata on supported paths, plus local commands over those files, including `vantio coverage`, `vantio destinations`, and `vantio export`. SQLite, a UI, and a stable schema are not included. [KNOWN-LIMITATIONS.md](KNOWN-LIMITATIONS.md).
 
 **Upgrade from v2 or from Python 3.0.x.** [UPGRADE-ROLLBACK-UNINSTALL.md](UPGRADE-ROLLBACK-UNINSTALL.md) and [PYTHON-GUIDE.md](PYTHON-GUIDE.md).
 
@@ -41,7 +41,7 @@ The stderr line `run trace_id=0x…` is the id for that launch. The file name is
 
 Node: `vantio run` prepends `--require` of the interceptor for `node`, `npx`, `tsx`, and `ts-node`. The interceptor writes a log even when nothing in-scope was called, if the process reaches the exit hook.
 
-Python: install `vantio-agent-sdk==3.1.1` on that interpreter, then `vantio run python agent.py` or call `shield()`. Without the SDK, the prefix does not intercept. Python writes a log only when at least one call was recorded.
+Python: install `vantio-agent-sdk==3.1.2` on that interpreter, then `vantio run python agent.py` or call `shield()`. Without the SDK, the prefix does not intercept. Python writes a log only when at least one call was recorded.
 
 Library lists: [SUPPORTED-PATHS.md](SUPPORTED-PATHS.md).
 
@@ -94,7 +94,7 @@ The record keeps destination metadata. It does not keep prompts, completions, or
 
 If you describe the telemetry field `hosts`, say what it is: customer LLM endpoint hostnames (at most 50). The CLI ping sends the hostname of the first recorded call. The Python `shield()` ping sends an empty list because it is sent before any observation.
 
-CLI 0.3.24 does not send the ping unless `VANTIO_TELEMETRY=1`. Published Python 3.0.14 `shield()` sends it unless `VANTIO_TELEMETRY_DISABLED=1` or `DO_NOT_TRACK=1`. Those are different gates. Do not collapse them.
+CLI 0.3.24 through 0.3.27 does not send the ping unless `VANTIO_TELEMETRY=1`. Published Python 3.0.14 `shield()` sends it unless `VANTIO_TELEMETRY_DISABLED=1` or `DO_NOT_TRACK=1`. Those are different gates. Do not collapse them.
 
 ## Local proof
 
@@ -111,7 +111,7 @@ The MCP reader follows `VANTIO_HOME`. `vantio discover`, `search`, `tail`, `diff
 ## Limits that belong in every evaluation
 
 - Only wrapped processes and in-scope hosts produce rows.
-- No database and no UI. JSON records stay `unstable-pre-1.0`. This source tree's `vantio destinations` flags a new destination, and `vantio export` can send OTLP/HTTP JSON, syslog or JSON lines, and a webhook. Published npm CLI 0.3.24 does not include those commands.
+- No database and no UI. JSON records stay `unstable-pre-1.0`. `vantio destinations` flags a new destination, and `vantio export` can send OTLP/HTTP JSON, syslog or JSON lines, and a webhook. Both are in published npm CLI 0.3.27. 0.3.24 does not include them.
 - No retention command. Disk grows until you delete files.
 - No cross-process lock. The same trace id overwrites one file.
 - Write failures are silent.

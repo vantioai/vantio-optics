@@ -37,7 +37,7 @@ There is no curl installer at `https://vantio.ai/install.sh`.
 
 ```bash
 # Example status: illustrative
-pip install 'vantio-agent-sdk==3.1.1'
+pip install 'vantio-agent-sdk==3.1.2'
 python -c 'import vantio; print(vantio.__version__)'
 ```
 
