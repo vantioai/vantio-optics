@@ -21,7 +21,11 @@ These versions are what the public registries returned on 2026-10-21. Pin them. 
 
 `@vantio/cli` needs Node.js `>=18.3.0`. `vantio-agent-sdk` needs Python `>=3.10`. There is no installer at `https://vantio.ai/install.sh`.
 
-This git tree is ahead of the registries in two places: `@vantio/cli` here is **0.3.26**, and `vantio-agent-sdk` here is **3.1.2**. Those are not the packages the commands above install. Use the registry pins for a published install. Build from this tree only when you mean to run this source.
+Keep the `@vantio/cli@0.3.24` pin. On 2026-11-19 npm marks `@vantio/cli` **0.3.26** as latest, so `npm install -g @vantio/cli` without a version installs 0.3.26. In 0.3.26, `vantio run python` prints `Python wrap did not install (TypeError)` and records no Python calls when `vantio-agent-sdk` is installed. Node recording is not affected. 0.3.24 records Python calls with `vantio-agent-sdk` 3.1.1 and 3.1.2. The fix is in this tree and is not on npm yet.
+
+PyPI marks `vantio-agent-sdk` **3.1.2** as latest. The 3.1.1 pin above still works.
+
+Build from this tree only when you mean to run this source.
 
 ## Quick start
 
