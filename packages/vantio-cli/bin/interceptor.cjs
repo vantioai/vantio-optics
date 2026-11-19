@@ -196,6 +196,30 @@ function markLiveNoted(record, noted) {
   return record;
 }
 
+// Fill in a recorded node:http/https/http2 call once its response arrives.
+// The run log is written at exit, so updating the record in place is enough.
+// Only the status line and headers are read. The body is never touched.
+function recordHttpResponse(record, statusCode, headers, startedMs) {
+  const status = Number(statusCode);
+  if (Number.isInteger(status)) {
+    record.status = status;
+    record.ok = status >= 200 && status < 400;
+  }
+  const ct = headers && headers["content-type"];
+  if (typeof ct === "string" && ct) record.content_type = ct.split(";")[0].trim();
+  const cl = parseInt(headers && headers["content-length"], 10);
+  if (Number.isFinite(cl) && cl >= 0) record.bytes = cl;
+  record.duration_ms = Math.max(0, Date.now() - startedMs);
+}
+
+function recordHttpError(record, err, startedMs) {
+  if (record.status != null) return;
+  record.ok = false;
+  record.error = (err && err.code) || "request_error";
+  record.error_class = (err && err.name) || "Error";
+  record.duration_ms = Math.max(0, Date.now() - startedMs);
+}
+
 _calls.push = function vantioRecordCall(...items) {
   const result = _pushCall(...items);
   try {
@@ -939,7 +963,8 @@ globalThis.fetch = function vantioFetch(input, init) {
         content_type: null, duration_ms: 0, ts, optics_plane: "app_http",
       };
 
-      _calls.push({ ...baseCall, action: "OBSERVED" });
+      const record = { ...baseCall, action: "OBSERVED" };
+      _calls.push(record);
       report({
         target_host: hostname, pid: process.pid,
         action_taken: "OBSERVED",
@@ -948,13 +973,22 @@ globalThis.fetch = function vantioFetch(input, init) {
       });
       log(`${c.cyan}[ ∅ VANTIO ]${c.reset} Optics status: ${humanStatus("SUCCESS")} — ${hostname} — Node ${scheme}.request`);
 
+      const startedMs = Date.now();
       const req = launchHttpHandled(launch);
       if (req && typeof req.on === "function") {
+        try {
+          if (typeof req.method === "string" && req.method) record.method = req.method;
+          if (typeof req.path === "string" && req.path) record.path = req.path.split("?")[0];
+        } catch { /* ignore */ }
         req.on("response", (res) => {
           try {
             const cl = parseInt(res && res.headers && res.headers["content-length"], 10);
             if (Number.isFinite(cl) && cl > 0) spentUsd += cl * USD_PER_BYTE;
+            recordHttpResponse(record, res && res.statusCode, res && res.headers, startedMs);
           } catch { /* ignore */ }
+        });
+        req.on("error", (err) => {
+          try { recordHttpError(record, err, startedMs); } catch { /* ignore */ }
         });
       }
       return req;
@@ -1214,17 +1248,28 @@ globalThis.fetch = function vantioFetch(input, init) {
         content_type: null, duration_ms: 0, ts, optics_plane: "app_http2",
       };
 
-      _calls.push({ ...baseCall, action: "OBSERVED" });
+      const record = { ...baseCall, action: "OBSERVED" };
+      try {
+        if (headers && typeof headers[":method"] === "string") record.method = headers[":method"];
+        else record.method = "GET";
+        if (headers && typeof headers[":path"] === "string") record.path = headers[":path"].split("?")[0];
+      } catch { /* ignore */ }
+      _calls.push(record);
       reportH2(hostname, "OBSERVED");
       log(`${c.cyan}[ ∅ VANTIO ]${c.reset} Optics status: ${humanStatus("SUCCESS")} — ${hostname} — Node http2.request`);
 
+      const startedMs = Date.now();
       const stream = origRequest(headers, options);
       if (stream && typeof stream.on === "function") {
         stream.on("response", (hdrs) => {
           try {
             const cl = parseInt(hdrs && (hdrs["content-length"] || hdrs["Content-Length"]), 10);
             if (Number.isFinite(cl) && cl > 0) spentUsd += cl * USD_PER_BYTE;
+            recordHttpResponse(record, hdrs && hdrs[":status"], hdrs, startedMs);
           } catch { /* ignore */ }
+        });
+        stream.on("error", (err) => {
+          try { recordHttpError(record, err, startedMs); } catch { /* ignore */ }
         });
       }
       return wrapH2Write(stream, hostname);
