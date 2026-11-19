@@ -2,7 +2,7 @@
 
 **Vantio** is the infrastructure control layer for autonomous AI. This package is **Vantio Optics** Observe for Node: a trace ID around your agent. It does not wrap `fetch` by itself — Node wrap lives in [`@vantio/cli`](https://www.npmjs.com/package/@vantio/cli) (`vantio run`).
 
-Optics does not block on its own. [Phantom Engine](https://github.com/vantioai/vantio-phantom-engine) enforces rules on the wrapped path and provides runtime protection on enrolled Linux — Observe, Enforce, and Control in one purchase.
+Optics does not block on its own. [Phantom Engine](https://github.com/vantioai/vantio-phantom-engine) is the Vantio product built to enforce rules on the wrapped path and add runtime protection on enrolled Linux. Its live enforcement is not yet proven. Observe, Enforce, and Control come in one purchase.
 
 ```bash
 npm install @vantio/agent-sdk@0.2.4
