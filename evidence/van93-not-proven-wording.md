@@ -17,7 +17,7 @@ left alone.
 | docs/products/optics/USER-MANUAL.md | 7 | "Phantom Engine is the separate product that enforces." | Changed in this PR |
 | packages/vantio-agent-sdk/README.md | 5 | "Phantom Engine … enforces rules on the wrapped path and provides runtime protection on enrolled Linux" | Changed in this PR (council V210). Ships in the npm package only at the next publish, which needs Zach's go |
 | packages/vantio-agent-sdk-py/README.md | 5 | "Phantom Engine is runtime protection on enrolled Linux" | Changed in this PR (council V210). Ships in the PyPI package only at the next publish, which needs Zach's go |
-| packages/vantio-agent-sdk/README.md | 72 | "the SDK applies it locally" (application-path policy) | No change proposed: describes SDK code, not kernel enforcement |
+| packages/vantio-agent-sdk/README.md | 72 | "the SDK applies it locally … so you can fetch and enforce that policy yourself" | Changed in this PR (validation 2026-11-19 PM): the SDK does not enforce the policy; it fetches it and redacts PII in process, and Phantom Engine's live enforcement is not yet proven. Ships in the npm package only at the next publish |
 
 ## Runs
 
