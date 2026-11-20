@@ -675,6 +675,25 @@ def _account_response_bytes(headers: Any) -> None:
         return
 
 
+def _urllib_method(url: Any, data: Any) -> str:
+    """Return the method urllib will send for urlopen(url, data) or opener.open.
+
+    Same rule as urllib.request.Request.get_method: an explicit Request.method
+    wins; otherwise POST when there is a body (data passed in, or the
+    Request's own data), else GET. The Request is not modified.
+    """
+    try:
+        if hasattr(url, "get_method"):
+            explicit = getattr(url, "method", None)
+            if explicit:
+                return str(explicit).upper()
+            has_body = data is not None or getattr(url, "data", None) is not None
+            return "POST" if has_body else "GET"
+    except Exception:
+        pass
+    return "POST" if data is not None else "GET"
+
+
 def _observe_urlopen(url, data=None, timeout=None, *args, **kwargs):
     hostname, port, path = _host_port_from_url(url)
     try:
@@ -704,7 +723,7 @@ def _observe_urlopen(url, data=None, timeout=None, *args, **kwargs):
                 "python_urllib",
                 getattr(resp, "status", None) or getattr(resp, "code", None),
                 t0,
-                method="POST" if data is not None else "GET",
+                method=_urllib_method(url, data),
                 path=path,
                 scheme=scheme,
             )
@@ -717,7 +736,7 @@ def _observe_urlopen(url, data=None, timeout=None, *args, **kwargs):
             t0,
             record_send=record_send,
             action="OBSERVED",
-            method="POST" if data is not None else "GET",
+            method=_urllib_method(url, data),
             path=path,
             scheme=scheme,
         )
@@ -753,7 +772,7 @@ def _observe_opener_open(self, fullurl, data=None, timeout=socket._GLOBAL_DEFAUL
                 "python_urllib",
                 getattr(resp, "status", None) or getattr(resp, "code", None),
                 t0,
-                method="POST" if (data is not None or body is not None) else "GET",
+                method=_urllib_method(fullurl, data),
                 path=path,
                 scheme=scheme,
             )
@@ -766,7 +785,7 @@ def _observe_opener_open(self, fullurl, data=None, timeout=socket._GLOBAL_DEFAUL
             t0,
             record_send=record_send,
             action="OBSERVED",
-            method="POST" if (data is not None or body is not None) else "GET",
+            method=_urllib_method(fullurl, data),
             path=path,
             scheme=scheme,
         )
