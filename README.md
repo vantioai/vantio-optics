@@ -52,7 +52,7 @@ The editor extension in `extensions/vantio-optics` wraps the same CLI commands. 
 
 ## Phantom Engine
 
-Optics is the observe path. [Phantom Engine](https://vantio.ai/phantom-engine) is enforcement and runtime protection for Linux systems you enroll. Optics does not enroll a system and does not apply policy. A call Optics did not record was not observed. That absence is not a block.
+Optics is the observe path. [Phantom Engine](https://vantio.ai/phantom-engine) is the Vantio product built for enforcement and runtime protection on Linux systems you enroll. Its live enforcement is not yet proven. Optics does not enroll a system and does not apply policy. A call Optics did not record was not observed. That absence is not a block.
 
 ## Docs
 
