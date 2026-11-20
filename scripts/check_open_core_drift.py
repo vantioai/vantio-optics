@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Fail when the package code here drifts from vantio-open-core main.
 
-During the freeze in docs/publishing.md, vantio-open-core still publishes
-@vantio/cli 0.3.26 and vantio-agent-sdk 3.1.2 from sealed bytes. The package
+During the freeze in docs/publishing.md, vantio-open-core publishes from
+sealed bytes: @vantio/cli 0.3.27 and vantio-agent-sdk 3.1.2 are on the
+registries, and its sealed vantio-agent-sdk 3.1.3 is not published. The package
 code in this repository must stay byte-identical to open-core so the public
 home shows the code that ships.
 
