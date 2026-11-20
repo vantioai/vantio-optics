@@ -2,3 +2,14 @@ packages:
   - 'packages/vantio-agent-sdk'
   - 'packages/vantio-cli'
   - 'packages/vantio-optics-mcp'
+
+# hono before 4.13.16 and @hono/node-server before 2.1.3 have open
+# advisories (GHSA-46wx-v44x-9hh2, GHSA-4h7h-rv7c-7m2v, GHSA-4m76-xfj5-7975,
+# GHSA-h7mg-cq63-vhpq, GHSA-3gg2-335m-rxc6, GHSA-rmxm-3fg6-px4f,
+# GHSA-jpvv-r467-5p4w and older). Both reach @vantio/optics-mcp through
+# @modelcontextprotocol/sdk, so Dependabot cannot move them; these floors
+# keep a lock refresh from going back. Same floors as vantio-open-core
+# (VAN-188, VAN-306).
+overrides:
+  hono@<4.13.16: ^4.13.16
+  '@hono/node-server@<2.1.3': ^2.1.3
