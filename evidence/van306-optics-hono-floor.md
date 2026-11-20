@@ -45,10 +45,52 @@ Run on a copy of the files the floor test reads.
 | pnpm parser skips snapshot dependencies | negative test |
 | Restored | 6 pass |
 
+## Round 2: Node floor raised to 20
+
+Base for this round: this branch's first commit `e564508`. Mirror of open-core #426's second commit. No VM run. No workflow dispatch. Nothing tagged or published.
+
+### Finding
+
+`pnpm-lock.yaml` has `@hono/node-server` 2.1.5, which records `engines: {node: '>=20'}`. `@vantio/optics-mcp` still said `engines.node >=18.3.0`, a Node version its own dependency refuses.
+
+### What changed
+
+- `packages/vantio-optics-mcp/package.json`: `engines.node` `>=18.3.0` → `>=20`, the same as open-core #426. Version stays 0.1.2. This is user-facing for the next MCP release, so it needs council review.
+- `pnpm-lock.yaml` is unchanged; `pnpm install --frozen-lockfile` passes.
+- New `packages/vantio-optics-mcp/test/engines_node_floor.test.js`: the manifest's `engines.node` floor must be at least the floor `@hono/node-server` declares in `pnpm-lock.yaml`. Only plain `>=X[.Y[.Z]]` ranges are accepted. Negative cases cover a lower floor, odd ranges, a lock entry with no `engines`, and the lock parser. It runs in CI through `pnpm --filter @vantio/optics-mcp run test`.
+
+### Commands
+
+Node 22.23.5, pnpm 11.13.0, Python 3.12.3 venv with requests 2.34.2, httpx 0.28.1, aiohttp 3.14.5, urllib3 2.8.0, build 1.6.1. Base is `e564508` on this host, same commands.
+
+| Command | rc (this round) | rc (`e564508`) | Result |
+| --- | --- | --- | --- |
+| `pnpm install --frozen-lockfile` | 0 | 0 | |
+| `pnpm lint` | 0 | 0 | |
+| `pnpm test` | 0 | 0 | 240 pass, 1 skipped (base 237; 3 new) |
+| `pnpm test:python` | 0 | 0 | 128 tests OK, 2 skipped |
+| `pnpm build` | 0 | 0 | |
+| AGENTS.md secret scan | 0 | 0 | no pattern matched |
+| `python3 scripts/check_open_core_drift.py <open-core #426 round 2>` | 0 | | "Package code matches" |
+| `python3 scripts/check_open_core_drift.py <open-core 974f2ed>` | 1 | 0 | differs only in `packages/vantio-optics-mcp/package.json`, so this round and #426's round 2 go together |
+| New `engines_node_floor.test.js` on base manifest | | 1 | 1 of 3 fails |
+| New `engines_node_floor.test.js` on this round | 0 | | 3 pass |
+
+### Mutation checks
+
+| Mutation | Caught by |
+| --- | --- |
+| manifest to `>=19.9` | "engines.node is at least what @hono/node-server needs" |
+| manifest to `^20.0.0` | same test (range refused) |
+| `lower()` always false | negative test |
+| pnpm lock parser finds nothing | "pnpm-lock.yaml records @hono/node-server" and negative test |
+| `rangeFloor` takes the first number of any range | negative test |
+| Restored | 3 pass |
+
 ## Gaps
 
-- The open-core drift check in CI skips without `OPEN_CORE_READ_TOKEN`, so a green drift job there is not a comparison. The drift result above came from a local open-core checkout at #426.
+- The open-core drift check in CI skips without `OPEN_CORE_READ_TOKEN`, so a green drift job there is not a comparison. The drift results above came from local open-core checkouts.
 - Dependabot alerts may be off for this repository (VAN-231), so this was checked against the advisory ranges, not GitHub's alert view.
 - zod 3.25.76 and body-parser 2.3.0 still have open advisories here: VAN-308.
-- `@hono/node-server` 2.x requires Node 20 or later; `@vantio/optics-mcp` still says `engines.node >=18.3.0`. Owner question, same as open-core #426.
-- The optics-mcp server reports version `0.1.0` in its handshake while the package is 0.1.2. Not changed here.
+- Raising `engines.node` to `>=20` is user-facing for the next MCP release. It needs council review and Zach's release go; any release note or README line about it also needs Kate. No README, doc or changelog was changed here. Not tested on Node 18 or 20; all runs used Node 22.23.5, as CI does.
+- The optics-mcp server reports version `0.1.0` in its handshake while the package is 0.1.2. Not changed here (VAN-310).
