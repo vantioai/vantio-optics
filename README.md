@@ -25,7 +25,7 @@ These versions are what the public registries returned on 2026-11-19. Pin them. 
 
 PyPI marks `vantio-agent-sdk` **3.1.2** as latest. 3.1.1 also works with CLI 0.3.27.
 
-This tree's packages match the registry versions above. Build from this tree only when you mean to run this source.
+This tree is `@vantio/cli` 0.3.28 and `vantio-agent-sdk` 3.1.3. Neither is published, so the install lines above stay on 0.3.27 and 3.1.2. The other packages match the registry versions above. Build from this tree only when you mean to run this source.
 
 ## Quick start
 

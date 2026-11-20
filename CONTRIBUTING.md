@@ -4,8 +4,8 @@ Vantio Optics is Linux security for AI: see what AI is doing on your Linux syste
 
 | Path | Package |
 | --- | --- |
-| `packages/vantio-cli` | `@vantio/cli` on npm. Published version on 2026-11-19: `0.3.27`. This tree: `0.3.27`. |
-| `packages/vantio-agent-sdk-py` | `vantio-agent-sdk` on PyPI. Published version on 2026-10-21: `3.1.1`. This tree: `3.1.2`. |
+| `packages/vantio-cli` | `@vantio/cli` on npm. Published version on 2026-11-20: `0.3.27`. This tree: `0.3.28`, not published. |
+| `packages/vantio-agent-sdk-py` | `vantio-agent-sdk` on PyPI. Published version on 2026-11-20: `3.1.2`. This tree: `3.1.3`, not published. |
 | `packages/vantio-agent-sdk` | `@vantio/agent-sdk` on npm, `0.2.4`. |
 | `packages/vantio-optics-mcp` | `@vantio/optics-mcp` on npm, `0.1.2`. |
 | `extensions/vantio-optics` | Editor extension. Not an npm package. |
