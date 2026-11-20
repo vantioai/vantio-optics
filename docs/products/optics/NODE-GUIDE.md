@@ -1,6 +1,6 @@
 # Node guide
 
-This page is `@vantio/cli@0.3.27`. The CLI in this source tree is that frozen version.
+This page is `@vantio/cli@0.3.27`, the published release. The CLI in this source tree is 0.3.28, which is not published.
 
 ## Attach
 
