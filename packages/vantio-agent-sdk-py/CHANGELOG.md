@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.1.3
+
+Source version for the urllib method fix. This heading records the version in `pyproject.toml`. It does not upload a wheel or sdist and it does not create a tag.
+
+- urllib calls record the method urllib sends. An explicit `Request.method` wins; otherwise a call with a body (the `data` argument or the Request's own `data`) is `POST`, and one without is `GET`. Before this, `urlopen(Request(url, data=..., method="POST"))` was recorded as `GET`, and an explicit `PUT`, `DELETE` or `PATCH` Request was recorded as `GET` or `POST`.
+
 ## 3.1.2
 
 Source version for the live destination record. This heading records the version in `pyproject.toml`. It does not upload a wheel or sdist and it does not create a tag.
