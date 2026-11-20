@@ -2,6 +2,7 @@
  * Vantio Optics MCP — observe / explain only.
  * No enforcement tools in this MCP. Upgrade path is explicit in tool copy + optics_upgrade_path.
  */
+import { readFileSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import {
@@ -12,6 +13,9 @@ import {
   UPGRADE_PATH,
   runsDir,
 } from "./runs.js";
+
+// The handshake version comes from this package's own package.json (VAN-310).
+const PACKAGE_VERSION = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 
 function text(data) {
   const body = typeof data === "string" ? data : JSON.stringify(data, null, 2);
@@ -25,7 +29,7 @@ function err(message) {
 export function createOpticsMcpServer() {
   const server = new McpServer({
     name: "vantio-optics",
-    version: "0.1.0",
+    version: PACKAGE_VERSION,
   });
 
   server.tool(
