@@ -1,0 +1,23 @@
+# Weekly dependency update PRs (VAN-231). Security updates follow the
+# repository's Dependabot security settings, which this file does not change.
+# Every PR is a normal draft-review PR; nothing here merges on its own.
+version: 2
+updates:
+  # pnpm workspace at the root (pnpm-lock.yaml).
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-and-patch:
+        update-types: ["minor", "patch"]
+  # Actions pinned in .github/workflows.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns: ["*"]
