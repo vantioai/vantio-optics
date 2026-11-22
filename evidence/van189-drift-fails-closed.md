@@ -56,3 +56,24 @@ No VM run. No workflow dispatch.
    this repository is therefore not all green until VAN-78 is done.
 3. The `@vantio/cli` strace tests did not finish on this loaded host. That
    package is not changed here.
+
+## Pre-review follow-up (Nov 22)
+
+The builder pre-review on the issue raised two points.
+
+- Low: with `exit 1`, the `present == 'true'` gates on the checkout and
+  compare steps are a second guard. The header comment now says so, so
+  nobody drops the `exit 1` thinking the gates cover it. Comment only; no
+  step changed.
+- Medium: fork and Dependabot pull requests get no repository secrets, so
+  this job stays red on them after VAN-78. No option was marked
+  recommended, so the fail-closed one stands (red on those PRs). No code
+  change. Zach can redirect.
+
+| Command | rc | Result |
+| --- | --- | --- |
+| `node --test test/agent-docs.test.js test/open-core-drift-workflow.test.js` | 0 | 6 pass |
+| `python3 -c "import yaml; yaml.safe_load(...)"` on the workflow | 0 | parses |
+| secret-scan command from `AGENTS.md` | 0 | no pattern matched |
+
+The rest of the suite runs in this pull request's CI.
