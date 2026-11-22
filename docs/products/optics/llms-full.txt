@@ -1544,8 +1544,6 @@ When a later manual version is cut, it should name the registry versions it was 
 
 The product name in this manual is Vantio Optics. Older package summaries contain the phrase Sight Loop. Published Python run files still store `workflow` `sight_loop`. Support should recognize the string and should not use it as the name of the product.
 
-Gate is an internal name for enforcement functions inside Phantom Engine. It is not a current standalone public SKU. This manual does not document it as something to install.
-
 ========================================================================
 FILE: VERSION-METADATA.json
 ========================================================================
