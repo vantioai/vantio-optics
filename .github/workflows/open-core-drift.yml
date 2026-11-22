@@ -5,7 +5,14 @@ name: Open-core drift
 #
 # vantio-open-core is private. The checkout needs the repository secret
 # OPEN_CORE_READ_TOKEN: a fine-grained token with read-only Contents access
-# to vantioai/vantio-open-core. Without it the job reports a skip and passes.
+# to vantioai/vantio-open-core. Without it the job fails: no comparison ran,
+# so it must not pass (VAN-189).
+#
+# The `exit 1` in the token check is what fails the job. The
+# `if: steps.token.outputs.present == 'true'` gates on the two steps after it
+# are a second guard only; keep both. Fork and Dependabot pull requests get no
+# repository secrets, so this job is red on them as well. That is fail-closed
+# on purpose.
 
 on:
   pull_request: {}
@@ -37,7 +44,8 @@ jobs:
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::OPEN_CORE_READ_TOKEN is not set. vantio-open-core is private, so the drift check is skipped."
+            echo "::error::OPEN_CORE_READ_TOKEN is not set. vantio-open-core is private, so nothing was compared. The drift check fails."
+            exit 1
           fi
 
       - name: Checkout vantio-open-core main
