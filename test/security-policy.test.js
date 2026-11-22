@@ -90,3 +90,36 @@ test("the old Optics wording, which sent Phantom Engine reports nowhere, fails",
     "Phantom Engine reports are not sent to security@vantio.ai",
   ]);
 });
+
+// The pin only holds if CI runs it. ci.yml runs the root tests in the JS job (VAN-169).
+const ciPath = path.join(repoRoot, ".github", "workflows", "ci.yml");
+const ROOT_TESTS_STEP = "      - name: Test repository checks\n        run: node --test test/*.test.js\n";
+
+export function ciProblems(text) {
+  const start = text.indexOf("  lint-and-test-js:");
+  const end = text.indexOf("\n  test-python:");
+  if (start === -1) return ["ci.yml has no lint-and-test-js job"];
+  const job = text.slice(start, end === -1 ? undefined : end);
+  const at = job.indexOf(ROOT_TESTS_STEP);
+  if (at === -1) return ["the JS job does not run the root tests"];
+  const next = job.indexOf("\n      - name: ", at + 1);
+  const step = job.slice(at, next === -1 ? undefined : next);
+  const problems = [];
+  if (/\n\s+if:/.test(step)) problems.push("the root tests step is conditional");
+  if (/continue-on-error:\s*true/.test(step)) problems.push("the root tests step may fail without failing the job");
+  return problems;
+}
+
+const ci = readFileSync(ciPath, "utf8");
+
+test("CI runs the root tests, so the policy pin is checked on every pull request", () => {
+  assert.deepEqual(ciProblems(ci), []);
+});
+
+test("negative: a JS job without the root tests step, or one that may fail, is caught", () => {
+  assert.deepEqual(ciProblems(ci.replace(ROOT_TESTS_STEP, "")), ["the JS job does not run the root tests"]);
+  const soft = ci.replace(ROOT_TESTS_STEP, `${ROOT_TESTS_STEP}        continue-on-error: true\n`);
+  assert.deepEqual(ciProblems(soft), ["the root tests step may fail without failing the job"]);
+  const gated = ci.replace(ROOT_TESTS_STEP, `${ROOT_TESTS_STEP}        if: github.event_name == 'push'\n`);
+  assert.deepEqual(ciProblems(gated), ["the root tests step is conditional"]);
+});

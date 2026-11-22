@@ -42,7 +42,36 @@ Node 22.23.5, pnpm 11.13.0, Python 3.13.
 ## Gaps
 
 - The org `.github` default `SECURITY.md` is not drafted: that repository was not reachable here.
-- The root `test/` files, including the new one, are not run by `.github/workflows/ci.yml`; CI runs the package tests only. This was already true for the two existing root tests.
+- Closed on Nov 22 (see below): CI now runs the root `test/` files.
 - The hash pins open-core's text as read on 2026-11-21. If open-core's policy changes, this test fails until the two are brought back in line, which is the point.
 - Whether security@vantio.ai exists and is monitored is VAN-149. This PR stays a draft until then.
 - Public-facing wording: needs council review and Kate's sign-off, and Zach's go to merge.
+
+## Follow-up, Nov 22: CI runs the root tests
+
+The builder pre-review noted that `ci.yml` ran package tests only, so a later
+pull request could change `SECURITY.md` and CI would stay green.
+
+- `ci.yml`, job `lint-and-test-js`: new last step `Test repository checks`,
+  `node --test test/*.test.js`. No `if`, no `continue-on-error`, no secret,
+  no new action. It runs the three existing root test files.
+- `test/security-policy.test.js`: two new tests. The JS job must have that
+  step, unconditional and without `continue-on-error`. Negative cases: the
+  step removed, `continue-on-error: true`, and an `if:` are each reported.
+
+| Command | rc | Result |
+| --- | --- | --- |
+| `node --test test/*.test.js` | 0 | 11 pass, 0 fail (2 new) |
+| `python3 -c "import yaml; yaml.safe_load(...)"` on `ci.yml` | 0 | parses |
+| AGENTS.md secret scan | 0 | no pattern matched |
+
+| Mutation (restored after) | Caught by |
+| --- | --- |
+| Step removed from `ci.yml` | both new tests |
+| `continue-on-error: true` on the step | both new tests |
+| Step runs `test/agent-docs.test.js` only | both new tests |
+| `if: false` on the step | both new tests |
+| Checker ignores `continue-on-error` | the negative test |
+
+The package suites are unchanged by this commit; this pull request's CI runs
+them.

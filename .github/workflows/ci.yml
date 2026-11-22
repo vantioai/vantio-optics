@@ -54,6 +54,9 @@ jobs:
       - name: Build @vantio/agent-sdk
         run: pnpm --filter @vantio/agent-sdk run build
 
+      - name: Test repository checks
+        run: node --test test/*.test.js
+
   test-python:
     name: Test Python SDK (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
