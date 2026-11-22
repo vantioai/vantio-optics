@@ -1,0 +1,6 @@
+# Code owners for vantio-optics (VAN-363, option A).
+# Only Zach merges, so every path names him, and he owns .github/ too.
+# Path owners are added when Zach names them. Requiring code-owner review
+# takes a branch rule; none is turned on here.
+* @zacharybalicki
+/.github/ @zacharybalicki
