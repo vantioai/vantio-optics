@@ -1,8 +1,8 @@
 'use strict';
 
 // The drift workflow checks out vantioai/vantio-open-core, which is private.
-// It must read that repo with OPEN_CORE_READ_TOKEN and skip, not fail, when
-// the secret is absent.
+// It must read that repo with OPEN_CORE_READ_TOKEN and fail, not pass, when
+// the secret is absent: a run that compared nothing is not green (VAN-189).
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -23,7 +23,14 @@ function problems(text) {
   const out = [];
   const token = stepBlock(text, 'Check for the open-core read token');
   if (!token) out.push('missing token check step');
-  else if (!token.includes('secrets.OPEN_CORE_READ_TOKEN')) out.push('token step does not read the secret');
+  else {
+    if (!token.includes('secrets.OPEN_CORE_READ_TOKEN')) out.push('token step does not read the secret');
+    const missing = token.slice(token.indexOf('else'));
+    if (token.indexOf('else') === -1 || !/\n\s*exit 1\n/.test(missing)) {
+      out.push('a missing token does not fail the run');
+    }
+    if (!missing.includes('::error::')) out.push('a missing token is not reported as an error');
+  }
   const checkout = stepBlock(text, 'Checkout vantio-open-core main');
   if (!checkout) out.push('missing open-core checkout step');
   else {
@@ -37,7 +44,7 @@ function problems(text) {
   return out;
 }
 
-test('drift workflow reads private open-core with a token and skips without it', () => {
+test('drift workflow reads private open-core with a token and fails without it', () => {
   assert.deepEqual(problems(fs.readFileSync(WORKFLOW, 'utf8')), []);
 });
 
@@ -57,4 +64,24 @@ test('negative: a checkout with no token and no gate is rejected', () => {
   assert.ok(found.includes('open-core checkout is not gated on the token'));
   assert.ok(found.includes('open-core checkout does not pass the token'));
   assert.ok(found.includes('compare is not gated on the token'));
+});
+
+test('negative: a missing token that only logs a notice and passes is rejected', () => {
+  const skip = [
+    '      - name: Check for the open-core read token',
+    '        id: token',
+    '        env:',
+    '          OPEN_CORE_READ_TOKEN: ${{ secrets.OPEN_CORE_READ_TOKEN }}',
+    '        run: |',
+    '          if [ -n "$OPEN_CORE_READ_TOKEN" ]; then',
+    '            echo "present=true" >> "$GITHUB_OUTPUT"',
+    '          else',
+    '            echo "present=false" >> "$GITHUB_OUTPUT"',
+    '            echo "::notice::OPEN_CORE_READ_TOKEN is not set. The drift check is skipped."',
+    '          fi',
+    '',
+  ].join('\n');
+  const found = problems(skip);
+  assert.ok(found.includes('a missing token does not fail the run'));
+  assert.ok(found.includes('a missing token is not reported as an error'));
 });
