@@ -19,14 +19,24 @@ async function runVantio(args) {
   }
 }
 
+// One output channel per title, reused across runs and disposed with the extension.
+const channels = new Map();
+let subscriptions = null;
+
 function show(docTitle, body) {
-  const doc = vscode.window.createOutputChannel(docTitle);
+  let doc = channels.get(docTitle);
+  if (!doc) {
+    doc = vscode.window.createOutputChannel(docTitle);
+    channels.set(docTitle, doc);
+    if (subscriptions) subscriptions.push(doc);
+  }
   doc.clear();
   doc.appendLine(body);
   doc.show(true);
 }
 
 function activate(context) {
+  subscriptions = context.subscriptions;
   context.subscriptions.push(
     vscode.commands.registerCommand("vantio.prove", async () => {
       const out = await runVantio(["prove", "--format=md"]);
@@ -57,6 +67,9 @@ function activate(context) {
   );
 }
 
-function deactivate() {}
+function deactivate() {
+  channels.clear();
+  subscriptions = null;
+}
 
 module.exports = { activate, deactivate };

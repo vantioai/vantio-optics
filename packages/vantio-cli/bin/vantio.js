@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { basename, dirname, join } from "node:path";
 import { homedir, hostname } from "node:os";
-import { mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync, statSync, existsSync, watch } from "node:fs";
+import { closeSync, constants as fsConstants, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, writeFileSync, rmSync, readdirSync, statSync, existsSync, watch, writeSync } from "node:fs";
 import { randomUUID }    from "node:crypto";
 
 const require = createRequire(import.meta.url);
@@ -25,6 +25,7 @@ const {
   exportCommand,
   formatLiveAlert,
   noteWrappedSocket,
+  readRecordFile,
   recordWrappedRun,
   watchLiveJournal,
 } = require("./optics-features.cjs");
@@ -498,6 +499,25 @@ function escHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
+// A count from a run file is shown as a number only when it is one.
+function countText(n) {
+  return typeof n === "number" && Number.isFinite(n) ? n.toLocaleString() : String(n ?? "—");
+}
+
+// Markdown text: a line break becomes a space, and each mark that can start
+// inline markup, an HTML tag, or a table cell is escaped. Every backslash is
+// escaped too, so an escaped pipe can never be turned back into a cell edge.
+function mdText(s) {
+  return String(s ?? "").replace(/[\r\n]+/g, " ").replace(/[\\`*_[\]<>|~&!]/g, (ch) => `\\${ch}`);
+}
+
+// A code span only for text that needs no escaping; anything else is escaped text.
+function mdCode(s) {
+  const text = String(s ?? "").replace(/[\r\n]+/g, " ");
+  if (text && text.trim() === text && /^[^`|\\]*$/.test(text)) return `\`${text}\``;
+  return mdText(text);
+}
+
 function formatBytes(n) {
   if (n < 1024) return n.toLocaleString() + " B";
   if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
@@ -516,7 +536,7 @@ function generateHtmlReport(log) {
   const pid        = escHtml(log.pid         || "—");
   const startedAt  = escHtml(log.started_at  || "—");
   const genAt      = escHtml(log.generated_at || new Date().toISOString());
-  const durationMs = log.duration_ms != null ? `${Number(log.duration_ms).toLocaleString()} ms` : "—";
+  const durationMs = escHtml(log.duration_ms != null ? `${Number(log.duration_ms).toLocaleString()} ms` : "—");
   const cliVer     = escHtml(log.cli_version || "—");
 
   const rows = calls.map((c, i) => {
@@ -528,7 +548,7 @@ function generateHtmlReport(log) {
           <td>${escHtml(view.opticsLabel)}</td>
           <td>${escHtml(view.applicationLabel)}</td>
           <td class="num">${escHtml(http)}</td>
-          <td class="num">${view.bytes != null ? Number(view.bytes).toLocaleString() : "—"}</td>
+          <td class="num">${escHtml(view.bytes != null ? Number(view.bytes).toLocaleString() : "—")}</td>
           <td class="mono">${escHtml(view.ts || "—")}</td>
         </tr>`;
   }).join("\n");
@@ -590,14 +610,14 @@ function generateHtmlReport(log) {
 
     <h2>Summary</h2>
     <div class="metrics">
-      <div class="metric"><div class="metric-value">${totalCalls.toLocaleString()}</div><div class="metric-label">Total calls</div></div>
-      <div class="metric"><div class="metric-value">${totalBytes > 0 ? formatBytes(totalBytes) : "—"}</div><div class="metric-label">Total bytes</div></div>
-      <div class="metric"><div class="metric-value">${hosts.length}</div><div class="metric-label">Unique hosts</div></div>
+      <div class="metric"><div class="metric-value">${escHtml(countText(totalCalls))}</div><div class="metric-label">Total calls</div></div>
+      <div class="metric"><div class="metric-value">${escHtml(totalBytes > 0 ? formatBytes(Number(totalBytes)) : "—")}</div><div class="metric-label">Total bytes</div></div>
+      <div class="metric"><div class="metric-value">${escHtml(hosts.length)}</div><div class="metric-label">Unique hosts</div></div>
       <div class="metric"><div class="metric-value">${escHtml(humanStatus(rollup.opticsStatus))}</div><div class="metric-label">Optics status</div></div>
       <div class="metric"><div class="metric-value">${escHtml(humanStatus(rollup.applicationStatus))}</div><div class="metric-label">Application outcome</div></div>
     </div>
 
-    <h2>Call log (${totalCalls.toLocaleString()} call${totalCalls === 1 ? "" : "s"})</h2>
+    <h2>Call log (${escHtml(countText(totalCalls))} call${totalCalls === 1 ? "" : "s"})</h2>
     ${calls.length === 0
       ? "<p style=\"color:#888;font-size:.875rem\">No calls recorded in this run log.</p>"
       : `<table>
@@ -669,7 +689,7 @@ function generateMarkdownReport(log) {
   const rows = calls.map((c, i) => {
     const view = displayCall(c);
     const http = view.httpStatus != null ? view.httpStatus : "—";
-    return `| ${i + 1} | \`${view.hostname || "—"}\` | ${view.opticsLabel} | ${view.applicationLabel} | ${http} | ${view.bytes != null ? Number(view.bytes).toLocaleString() : "—"} | \`${view.ts || "—"}\` |`;
+    return `| ${i + 1} | ${mdCode(view.hostname || "—")} | ${mdText(view.opticsLabel)} | ${mdText(view.applicationLabel)} | ${mdText(http)} | ${mdText(view.bytes != null ? Number(view.bytes).toLocaleString() : "—")} | ${mdCode(view.ts || "—")} |`;
   }).join("\n");
 
   return `# Vantio Optics | Free Observability for AI Agents
@@ -678,7 +698,7 @@ function generateMarkdownReport(log) {
 
 **Privacy notice:** This report contains hostnames, byte counts, process IDs,
 trace IDs, Optics status, and Application outcome. Prompts and completions are never stored.
-CLI v${log.cli_version || "—"}.
+CLI v${mdText(log.cli_version || "—")}.
 
 ---
 
@@ -686,12 +706,12 @@ CLI v${log.cli_version || "—"}.
 
 | Field | Value |
 |-------|-------|
-| Trace ID | \`${log.trace_id || "—"}\` |
-| Run started | \`${log.started_at || "—"}\` |
-| Generated | \`${log.generated_at || new Date().toISOString()}\` |
-| Duration | \`${log.duration_ms != null ? `${Number(log.duration_ms).toLocaleString()} ms` : "—"}\` |
-| Process ID | \`${log.pid || "—"}\` |
-| CLI version | \`@vantio/cli v${log.cli_version || "—"}\` |
+| Trace ID | ${mdCode(log.trace_id || "—")} |
+| Run started | ${mdCode(log.started_at || "—")} |
+| Generated | ${mdCode(log.generated_at || new Date().toISOString())} |
+| Duration | ${mdCode(log.duration_ms != null ? `${Number(log.duration_ms).toLocaleString()} ms` : "—")} |
+| Process ID | ${mdCode(log.pid || "—")} |
+| CLI version | ${mdCode(`@vantio/cli v${log.cli_version || "—"}`)} |
 
 ---
 
@@ -699,17 +719,17 @@ CLI v${log.cli_version || "—"}.
 
 | Metric | Value |
 |--------|-------|
-| Total calls | **${totalCalls.toLocaleString()}** |
-| Total bytes | ${totalBytes > 0 ? totalBytes.toLocaleString() : "—"} |
+| Total calls | **${mdText(countText(totalCalls))}** |
+| Total bytes | ${mdText(totalBytes > 0 ? countText(totalBytes) : "—")} |
 | Unique hosts | ${hosts.length} |
 | Optics status | ${humanStatus(rollup.opticsStatus)} |
 | Application outcome | ${humanStatus(rollup.applicationStatus)} |
 
-Hosts: ${hosts.map((h) => `\`${h}\``).join(", ") || "—"}
+Hosts: ${hosts.map((h) => mdCode(h)).join(", ") || "—"}
 
 ---
 
-## Call log (${totalCalls} call${totalCalls === 1 ? "" : "s"})
+## Call log (${mdText(String(totalCalls))} call${totalCalls === 1 ? "" : "s"})
 
 | # | Host | Optics status | Application outcome | HTTP | Bytes | Timestamp |
 |---|------|---------------|---------------------|------|-------|-----------|
@@ -717,7 +737,7 @@ ${rows || "| — | — | — | — | — | — | — |"}
 
 ---
 
-*Generated by [Vantio AI](https://vantio.ai) · @vantio/cli v${log.cli_version || "—"}*
+*Generated by [Vantio AI](https://vantio.ai) · @vantio/cli v${mdText(log.cli_version || "—")}*
 *Report contains no prompts, completions, or content · [Privacy policy](https://vantio.ai/privacy)*
 `;
 }
@@ -796,10 +816,13 @@ function findRunByPrefix(dir, prefix, cmd = "prove") {
   return { path: join(dir, matches[0]), empty: false };
 }
 
-function readJsonFile(path) {
+// Run files are read only when they are regular files, not through a symlink.
+// An explicit --from path is the operator's choice: a symlink or a pipe is read.
+function readJsonFile(path, options) {
+  const explicit = Boolean(options && options.explicit);
   let text;
   try {
-    text = readFileSync(path, "utf8");
+    text = readRecordFile(path, { nofollow: !explicit, explicit });
   } catch (err) {
     return { unreadable: true, error: err };
   }
@@ -807,6 +830,66 @@ function readJsonFile(path) {
     return { json: JSON.parse(text) };
   } catch (err) {
     return { corrupt: true, error: err };
+  }
+}
+
+// An --out path that names one of this process's own open descriptors.
+function ownDescriptor(path) {
+  if (path === "/dev/stdout") return 1;
+  if (path === "/dev/stderr") return 2;
+  const match = /^(?:\/dev\/fd|\/proc\/self\/fd)\/(\d+)$/.exec(String(path));
+  return match ? Number(match[1]) : null;
+}
+
+// Write all of text to fd. A pipe set to non-blocking by another process can
+// answer EAGAIN when it is full; wait briefly and go on (at most 30 s).
+function writeAllSync(fd, text) {
+  const buf = Buffer.from(text, "utf8");
+  const deadline = Date.now() + 30000;
+  let off = 0;
+  while (off < buf.length) {
+    try {
+      off += writeSync(fd, buf, off, buf.length - off);
+    } catch (err) {
+      if (!err || err.code !== "EAGAIN" || Date.now() > deadline) throw err;
+      try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5); } catch { /* retry at once */ }
+    }
+  }
+}
+
+// The proof is written for the owner only and never through a symlink onto a
+// file. /dev/stdout, /dev/stderr and /dev/fd/N write to that descriptor. A
+// symlink to a pipe, a terminal or another device is followed, because
+// writing there cannot replace a file. Only a regular file is made 0600, so
+// --out=/dev/null does not change /dev/null.
+function writeOwnerOnly(path, text) {
+  const own = process.platform === "win32" ? null : ownDescriptor(path);
+  if (own != null) {
+    writeAllSync(own, text);
+    return;
+  }
+  const nofollow = fsConstants.O_NOFOLLOW || 0;
+  let fd;
+  try {
+    fd = openSync(path, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | nofollow, 0o600);
+  } catch (err) {
+    if (!err || err.code !== "ELOOP" || !nofollow) throw err;
+    // A symlink. Open what it names without O_CREAT or O_TRUNC, so nothing is
+    // created or cut, and write only when it is not a regular file.
+    const linked = openSync(path, fsConstants.O_WRONLY);
+    try {
+      if (fstatSync(linked).isFile()) throw err;
+      writeAllSync(linked, text);
+    } finally {
+      closeSync(linked);
+    }
+    return;
+  }
+  try {
+    if (fstatSync(fd).isFile()) fchmodSync(fd, 0o600);
+    writeFileSync(fd, text, "utf8");
+  } finally {
+    closeSync(fd);
   }
 }
 
@@ -827,12 +910,10 @@ function findMostRecentRun(dir) {
       // Prefer the JSON's generated_at timestamp for stable ordering (mtime can
       // be the same when fixtures are written in quick succession in tests).
       let t = 0;
-      try {
-        const log = JSON.parse(readFileSync(p, "utf8"));
-        if (log?.generated_at) t = new Date(log.generated_at).getTime();
-        else if (log?.started_at) t = new Date(log.started_at).getTime();
-      } catch { /* fall through to mtime */ }
-      if (!t) t = statSync(p).mtimeMs;
+      const log = readJsonFile(p).json;
+      if (log?.generated_at) t = new Date(log.generated_at).getTime();
+      else if (log?.started_at) t = new Date(log.started_at).getTime();
+      if (!t) t = lstatSync(p).mtimeMs;
       if (t > newestTime) { newestTime = t; newest = p; }
     } catch { /* skip */ }
   }
@@ -888,7 +969,7 @@ async function proveCommand(args) {
     process.stderr.write(`[ ∅ VANTIO ] Using most recent run log: ~/.vantio/runs/${logPath.split(/[\\/]/).pop()}\n`);
   }
 
-  const loaded = readJsonFile(logPath);
+  const loaded = readJsonFile(logPath, { explicit: Boolean(values.from) });
   if (loaded.unreadable || loaded.corrupt) failUnreadable("prove", logPath, loaded.error);
   const log = loaded.json;
   if (!log || typeof log !== "object" || Array.isArray(log)) {
@@ -914,7 +995,7 @@ async function proveCommand(args) {
 
   function writeProof(outPath) {
     try {
-      writeFileSync(outPath, report, "utf8");
+      writeOwnerOnly(outPath, report);
     } catch (err) {
       const detail = err && err.message ? String(err.message).split("\n")[0] : "could not write the proof";
       process.stderr.write(`vantio prove: could not write ${outPath}: ${detail}\n`);
@@ -949,7 +1030,7 @@ function discoverLocalCommand(since, hostFilter, asJson) {
   for (const f of files) {
     const filePath = join(runsDir(), f);
     try {
-      const s = statSync(filePath);
+      const s = lstatSync(filePath);
       if (s.mtimeMs < cutoff) continue;
       const loaded = readJsonFile(filePath);
       if (loaded.unreadable || loaded.corrupt) failUnreadable("discover", filePath, loaded.error);
