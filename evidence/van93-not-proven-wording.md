@@ -32,3 +32,7 @@ left alone.
 - Public copy: Quinn (council), Kate (wording) and Zach (go) sign off before
   anything merges or publishes.
 - `live_enforcement` stays NOT_PROVEN.
+
+## llms-full.txt regenerated (VAN-382)
+
+`docs/products/optics/llms-full.txt` copies the manual pages, and this branch changed pages without updating the copy. It was rebuilt with `node scripts/check_llms_full.mjs --write` from vantio-optics #30 (VAN-382). Only llms-full.txt changed, and only on the page lines this branch already changed. With #30's check copied in, it exits 0 on this head (it exited 1 before). Secret scan rc 0. CI is blocked by the billing lock (VAN-129).
