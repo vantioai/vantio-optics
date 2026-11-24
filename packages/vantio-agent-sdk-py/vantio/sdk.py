@@ -16,6 +16,7 @@ import hmac
 import json
 import os
 import sys
+import urllib.parse
 import urllib.request
 import urllib.error
 import uuid
@@ -136,6 +137,28 @@ def get_current_trace_id() -> Optional[str]:
     return _trace_id_var.get()
 
 
+def _ingest_url_problem(raw: str) -> Optional[str]:
+    """Return why an ingest URL is refused, or None when it may carry the key.
+
+    Same rule as ``vantio export``: http or https only, no credentials in the
+    URL, and plain http only to this machine.
+    """
+    try:
+        parsed = urllib.parse.urlsplit(str(raw))
+        host = (parsed.hostname or "").lower()
+        has_credentials = parsed.username is not None or parsed.password is not None
+    except ValueError:
+        return "ingest URL is not valid"
+    scheme = parsed.scheme.lower()
+    if scheme not in ("http", "https") or not parsed.netloc:
+        return "ingest URL must be http or https"
+    if has_credentials:
+        return "ingest URL must not contain credentials"
+    if scheme == "http" and host not in ("localhost", "127.0.0.1", "::1"):
+        return "ingest URL refuses plaintext to a remote host"
+    return None
+
+
 async def report_anomaly(
     *,
     target_host: Optional[str] = None,
@@ -168,6 +191,13 @@ async def report_anomaly(
     url = ingest_url or os.environ.get("VANTIO_INGEST_URL")
     key = api_key or os.environ.get("VANTIO_API_KEY")
     if not url or not key:
+        return
+
+    # The identity header carries the API key. It never goes over plain http
+    # to another machine.
+    problem = _ingest_url_problem(url)
+    if problem:
+        warnings.warn(f"[vantio] report_anomaly() skipped: {problem}")
         return
 
     is_audit = audit_mode if audit_mode is not None else os.environ.get("VANTIO_AUDIT_MODE") == "1"

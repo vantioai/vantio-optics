@@ -165,6 +165,28 @@ export function getCurrentContext(): VantioContext | undefined {
 }
 
 /**
+ * Returns the reason an ingest URL is refused, or null when it may carry the key.
+ * The rule matches `vantio export`: http or https only, no credentials in the
+ * URL, and plain http only to this machine.
+ */
+function ingestUrlProblem(raw: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return "ingest URL is not valid";
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return "ingest URL must be http or https";
+  if (parsed.username || parsed.password) return "ingest URL must not contain credentials";
+  if (parsed.protocol === "http:") {
+    const host = parsed.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+    const loopback = host === "localhost" || host === "127.0.0.1" || host === "::1";
+    if (!loopback) return "ingest URL refuses plaintext to a remote host";
+  }
+  return null;
+}
+
+/**
  * Sends an anomaly event to the Vantio ingest endpoint.
  * Call this from within a withVantio() frame after detecting a severance.
  *
@@ -222,6 +244,14 @@ export async function reportAnomaly(
     process.env["VANTIO_CLOUD_INGEST"] === "1";
 
   if (!cloudIngest) return; // Tier 1 local mode — cloud ingest not activated
+
+  // The identity header can hold VANTIO_API_KEY. It never goes over plain
+  // http to another machine.
+  const problem = ingestUrlProblem(ingestUrl);
+  if (problem) {
+    console.warn(`[vantio] reportAnomaly() skipped: ${problem}`);
+    return;
+  }
 
   try {
     const res = await fetch(`${ingestUrl}/api/v1/ingest`, {

@@ -9,6 +9,7 @@ import unittest
 import urllib.request
 import warnings
 from pathlib import Path
+from unittest import mock
 
 from vantio import fetch_policy, get_current_trace_id, redact_pii, report_anomaly, shield
 from vantio.sdk import VantioContext, _normalize_policy
@@ -206,6 +207,64 @@ class ReportAnomalyTests(unittest.IsolatedAsyncioTestCase):
                     target_host="x", ingest_url="http://127.0.0.1:1", api_key="vk_test_key"
                 )
         self.assertTrue(any("ingest request failed" in str(w.message) for w in caught))
+
+
+class ReportAnomalyTransportTests(unittest.IsolatedAsyncioTestCase):
+    """VAN-396: the API key never goes over plain http to another machine."""
+
+    def setUp(self) -> None:
+        self._saved = os.environ.get("VANTIO_CLOUD_INGEST")
+        os.environ["VANTIO_CLOUD_INGEST"] = "1"
+        self.opened: list[str] = []
+
+    def tearDown(self) -> None:
+        if self._saved is None:
+            os.environ.pop("VANTIO_CLOUD_INGEST", None)
+        else:
+            os.environ["VANTIO_CLOUD_INGEST"] = self._saved
+
+    def _fake_urlopen(self, req, *args, **kwargs):  # type: ignore[no-untyped-def]
+        self.opened.append(req.full_url)
+        return mock.MagicMock()
+
+    async def _send(self, url: str) -> list[str]:
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            async with shield():
+                # Patched inside shield(), which installs its own urlopen wrapper.
+                with mock.patch("urllib.request.urlopen", side_effect=self._fake_urlopen):
+                    await report_anomaly(target_host="x", ingest_url=url, api_key="vk_test_key")
+        return [str(w.message) for w in caught]
+
+    async def test_refuses_plain_http_to_a_remote_host(self) -> None:
+        for url in ("http://192.0.2.10", "http://ingest.example.com:8080", "HTTP://Example.COM"):
+            messages = await self._send(url)
+            self.assertTrue(any("refuses plaintext to a remote host" in m for m in messages), (url, messages))
+        self.assertEqual(self.opened, [])
+
+    async def test_refuses_credentials_and_other_schemes(self) -> None:
+        text = "\n".join(
+            (await self._send("https://user:pass@ingest.example.com"))
+            + (await self._send("file:///etc/passwd"))
+            + (await self._send("http://[::1"))
+        )
+        self.assertEqual(self.opened, [])
+        self.assertIn("must not contain credentials", text)
+        self.assertIn("must be http or https", text)
+        self.assertIn("is not valid", text)
+
+    async def test_sends_over_https_and_over_loopback_http(self) -> None:
+        for url in ("https://ingest.example.com", "http://localhost:9", "http://127.0.0.1:9", "http://[::1]:9"):
+            await self._send(url)
+        self.assertEqual(
+            self.opened,
+            [
+                "https://ingest.example.com/api/v1/ingest",
+                "http://localhost:9/api/v1/ingest",
+                "http://127.0.0.1:9/api/v1/ingest",
+                "http://[::1]:9/api/v1/ingest",
+            ],
+        )
 
 
 class HttpObserveTests(unittest.IsolatedAsyncioTestCase):
