@@ -8,7 +8,10 @@ const { homedir, hostname: osHostname, platform: osPlatform } = require("node:os
 const {
   appendFileSync,
   closeSync,
+  constants: fsConstants,
   existsSync,
+  fstatSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -19,6 +22,7 @@ const {
   statSync,
   writeFileSync,
 } = require("node:fs");
+const { constants: bufferConstants } = require("node:buffer");
 const { dirname, join } = require("node:path");
 const { request: httpRequest } = require("node:http");
 const { request: httpsRequest } = require("node:https");
@@ -371,10 +375,55 @@ function parseAllowlist(value) {
   return { allowlist };
 }
 
-function readJsonObject(path) {
+// Largest record file a reader accepts. It is the longest string Node can
+// hold, so no file that could be read before is refused now.
+const RECORD_FILE_MAX_BYTES = bufferConstants.MAX_STRING_LENGTH;
+
+function fileError(code, message) {
+  const err = new Error(message);
+  err.code = code;
+  return err;
+}
+
+// Read a record file without hanging or running out of memory on hostile input.
+// It opens only a regular file. With nofollow it refuses a symlink. O_NONBLOCK
+// keeps a FIFO from blocking the open; the type check then refuses it.
+// A path the operator named (explicit) may be any readable file, such as a
+// pipe, but it is still read only up to the size cap.
+function readRecordFile(path, options) {
+  const opts = options || {};
+  const maxBytes = opts.maxBytes || RECORD_FILE_MAX_BYTES;
+  if (opts.nofollow && lstatSync(path).isSymbolicLink()) {
+    throw fileError("ELOOP", "is a symbolic link");
+  }
+  const flags = fsConstants.O_RDONLY
+    | (opts.explicit ? 0 : (fsConstants.O_NONBLOCK || 0))
+    | (opts.nofollow ? (fsConstants.O_NOFOLLOW || 0) : 0);
+  const fd = openSync(path, flags);
+  try {
+    const info = fstatSync(fd);
+    if (!opts.explicit && !info.isFile()) throw fileError("EFTYPE", "is not a regular file");
+    if (info.isFile() && info.size > maxBytes) throw fileError("EFBIG", `is larger than ${maxBytes} bytes`);
+    const chunks = [];
+    let total = 0;
+    for (;;) {
+      const chunk = Buffer.allocUnsafe(Math.min(1 << 20, maxBytes - total + 1));
+      const read = readSync(fd, chunk, 0, chunk.length, null);
+      if (read === 0) break;
+      total += read;
+      if (total > maxBytes) throw fileError("EFBIG", `is larger than ${maxBytes} bytes`);
+      chunks.push(read === chunk.length ? chunk : chunk.subarray(0, read));
+    }
+    return Buffer.concat(chunks, total).toString("utf8");
+  } finally {
+    try { closeSync(fd); } catch { /* already closed */ }
+  }
+}
+
+function readJsonObject(path, options) {
   let text;
   try {
-    text = readFileSync(path, "utf8");
+    text = readRecordFile(path, options);
   } catch (err) {
     return { error: err, missing: err && err.code === "ENOENT" };
   }
@@ -397,7 +446,7 @@ function loadAllowlist(explicitPath) {
   const paths = allowlistCandidates(explicitPath);
   let sawMissing = true;
   for (const path of paths) {
-    const loaded = readJsonObject(path);
+    const loaded = readJsonObject(path, { explicit: Boolean(explicitPath) });
     if (loaded.missing) continue;
     sawMissing = false;
     if (loaded.error) return { error: `could not read allowlist ${path}: ${detailOf(loaded.error)}` };
@@ -460,7 +509,7 @@ function listRunLogs(roots) {
       const path = join(dir, name);
       if (seen.has(path)) continue;
       seen.add(path);
-      const loaded = readJsonObject(path);
+      const loaded = readJsonObject(path, { nofollow: true });
       if (loaded.error) return { error: `could not read ${path}: ${detailOf(loaded.error)}` };
       const log = loaded.json;
       if (!log || log.vantio_run_log !== "1" || !Array.isArray(log.calls)) continue;
@@ -479,7 +528,7 @@ function listMcpRecords(roots) {
     seen.add(path);
     let text;
     try {
-      text = readFileSync(path, "utf8");
+      text = readRecordFile(path, { nofollow: true });
     } catch (err) {
       if (err && err.code === "ENOENT") continue;
       return { error: `could not read ${path}: ${detailOf(err)}` };
@@ -1810,7 +1859,7 @@ function recordWrappedRun(input) {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   let existing = null;
   if (existsSync(path)) {
-    const loaded = readJsonObject(path);
+    const loaded = readJsonObject(path, { nofollow: true });
     if (loaded.error) throw new Error(`could not read ${path}: ${detailOf(loaded.error)}`);
     if (loaded.json && loaded.json.vantio_run_log === "1") existing = loaded.json;
   }
@@ -2315,6 +2364,7 @@ module.exports = {
   programLabelFromArgv,
   publicExportEvent,
   procGapsForCoverage,
+  readRecordFile,
   recordWrappedRun,
   stepFollowExport,
   validateWebhookToken,

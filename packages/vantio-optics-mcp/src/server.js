@@ -3,6 +3,8 @@
  * No enforcement tools in this MCP. Upgrade path is explicit in tool copy + optics_upgrade_path.
  */
 import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { sep } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import {
@@ -11,6 +13,8 @@ import {
   proveMarkdown,
   discoverLocal,
   UPGRADE_PATH,
+  runCalls,
+  runSummary,
   runsDir,
 } from "./runs.js";
 
@@ -26,6 +30,24 @@ function err(message) {
   return { content: [{ type: "text", text: message }], isError: true };
 }
 
+// A path under the home folder is shown from ~ so the account name stays out.
+function shownPath(path) {
+  const home = homedir();
+  if (home && (path === home || path.startsWith(home + sep))) return `~${path.slice(home.length)}`;
+  return path;
+}
+
+// A tool failure returns a fixed message, not the JavaScript error text.
+function guarded(handler) {
+  return async (args) => {
+    try {
+      return await handler(args);
+    } catch {
+      return err("Vantio Optics could not read the local run logs.");
+    }
+  };
+}
+
 export function createOpticsMcpServer() {
   const server = new McpServer({
     name: "vantio-optics",
@@ -38,13 +60,13 @@ export function createOpticsMcpServer() {
     {
       limit: z.number().int().min(1).max(100).optional().describe("Max runs to return (default 20)"),
     },
-    async ({ limit }) => {
+    guarded(async ({ limit }) => {
       const n = limit ?? 20;
       const runs = listRunLogs().slice(0, n).map(({ path, mtime_ms, ...rest }) => rest);
       return text({
         plane: "Observe",
         brand: "Vantio Optics",
-        runs_dir: runsDir(),
+        runs_dir: shownPath(runsDir()),
         count: runs.length,
         runs,
         note: runs.length
@@ -52,7 +74,7 @@ export function createOpticsMcpServer() {
           : "No runs yet. Instrument an agent: vantio run <command>",
         upgrade: "Enforcement requires Vantio Phantom Engine — see optics_upgrade_path.",
       });
-    },
+    }),
   );
 
   server.tool(
@@ -64,7 +86,7 @@ export function createOpticsMcpServer() {
         .optional()
         .describe("Trace ID or prefix; omit or 'latest' for most recent run"),
     },
-    async ({ trace_id }) => {
+    guarded(async ({ trace_id }) => {
       const result = loadRun(trace_id || "latest");
       if (result.error) return err(JSON.stringify(result, null, 2));
       const log = result.log;
@@ -78,8 +100,8 @@ export function createOpticsMcpServer() {
         generated_at: log.generated_at,
         duration_ms: log.duration_ms,
         cli_version: log.cli_version,
-        summary: log.summary,
-        calls: (log.calls || []).map((c) => ({
+        summary: runSummary(log),
+        calls: runCalls(log).map((c) => ({
           hostname: c.hostname,
           action: c.action,
           bytes: c.bytes,
@@ -90,11 +112,11 @@ export function createOpticsMcpServer() {
       return text({
         plane: "Observe",
         brand: "Vantio Optics",
-        path: result.path,
+        path: shownPath(result.path),
         run: safe,
         fence: UPGRADE_PATH.fence,
       });
-    },
+    }),
   );
 
   server.tool(
@@ -106,11 +128,11 @@ export function createOpticsMcpServer() {
         .optional()
         .describe("Trace ID or prefix; omit or 'latest' for most recent"),
     },
-    async ({ trace_id }) => {
+    guarded(async ({ trace_id }) => {
       const result = loadRun(trace_id || "latest");
       if (result.error) return err(JSON.stringify(result, null, 2));
       return text(proveMarkdown(result.log));
-    },
+    }),
   );
 
   server.tool(
@@ -125,7 +147,7 @@ export function createOpticsMcpServer() {
         .optional()
         .describe("Lookback window in days (default 7)"),
     },
-    async ({ since_days }) => {
+    guarded(async ({ since_days }) => {
       const days = since_days ?? 7;
       const hosts = discoverLocal(days * 24 * 60 * 60 * 1000);
       return text({
@@ -137,7 +159,7 @@ export function createOpticsMcpServer() {
         note: "Fleet-wide Shadow AI Discover with enforce status requires Vantio Phantom Engine.",
         upgrade: UPGRADE_PATH.next[0],
       });
-    },
+    }),
   );
 
   server.tool(
@@ -149,7 +171,7 @@ export function createOpticsMcpServer() {
         .optional()
         .describe("If true, include a one-line summary of the latest local run"),
     },
-    async ({ include_latest_run }) => {
+    guarded(async ({ include_latest_run }) => {
       const latest = include_latest_run ? listRunLogs()[0] : null;
       return text({
         brand: "Vantio Optics",
@@ -180,7 +202,7 @@ export function createOpticsMcpServer() {
           pricing: "https://vantio.ai/pricing",
         },
       });
-    },
+    }),
   );
 
   server.tool(
