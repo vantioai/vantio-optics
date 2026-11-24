@@ -28,6 +28,34 @@ function parseIpv6(hex) {
   return groups.join(":");
 }
 
+// One spelling per address, so an address read from /proc/net/tcp6 matches
+// the one Node or Python saw for the same socket: IPv6 as eight hex groups
+// without leading zeros, and an IPv4-mapped IPv6 address as dotted IPv4.
+function canonicalIp(value) {
+  let text = String(value || "").trim().toLowerCase().replace(/^\[|\]$/g, "").split("%")[0];
+  if (!text.includes(":")) return text;
+  const v4 = /(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(text);
+  if (v4) {
+    const b = v4.slice(1).map(Number);
+    if (b.some((n) => n > 255)) return text;
+    text = `${text.slice(0, v4.index)}${((b[0] << 8) | b[1]).toString(16)}:${((b[2] << 8) | b[3]).toString(16)}`;
+  }
+  const halves = text.split("::");
+  if (halves.length > 2) return text;
+  const head = halves[0] ? halves[0].split(":") : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+  const fill = halves.length === 2 ? 8 - head.length - tail.length : 0;
+  if (fill < 0) return text;
+  const groups = [...head, ...new Array(fill).fill("0"), ...tail];
+  if (groups.length !== 8) return text;
+  const words = groups.map((group) => (/^[0-9a-f]{1,4}$/.test(group) ? Number.parseInt(group, 16) : NaN));
+  if (words.some((word) => !Number.isInteger(word))) return text;
+  if (words.slice(0, 5).every((word) => word === 0) && words[5] === 0xffff) {
+    return [words[6] >> 8, words[6] & 0xff, words[7] >> 8, words[7] & 0xff].join(".");
+  }
+  return words.map((word) => word.toString(16)).join(":");
+}
+
 function parseAddress(token, ipv6) {
   const [addr, portHex] = String(token || "").split(":");
   if (!addr || !portHex) return null;
@@ -296,6 +324,7 @@ function sampleWrappedTree(procRoot, rootPid, hostsText) {
         ppid: proc.ppid,
         program: proc.program,
         destination,
+        ip: canonicalIp(socket.ip),
         port: socket.port,
       });
     }
@@ -353,6 +382,7 @@ function createWrapSampler(options) {
 }
 
 module.exports = {
+  canonicalIp,
   commandLooksLikeAi,
   createWrapSampler,
   discoverUncovered,

@@ -113,6 +113,14 @@ _orig_aiohttp_request: Any = None
 _orig_socket_connect: Any = None
 _orig_socket_connect_ex: Any = None
 _orig_create_connection: Any = None
+_orig_getaddrinfo: Any = None
+# Addresses DNS gave this process for in-scope hosts, as "ip|port" per host.
+# `vantio run` reads sockets from /proc and sees only the IP. With these it can
+# tell the socket of a call that is already recorded by name (VAN-407).
+_remote_addresses: dict[str, set[str]] = {}
+_remote_addresses_lock = threading.Lock()
+_REMOTE_ADDRESSES_PER_HOST = 64
+_REMOTE_ADDRESS_HOSTS = 256
 _orig_ssl_connect: Any = None
 _orig_http_request: Any = None
 _orig_http_getresponse: Any = None
@@ -1183,8 +1191,49 @@ def _observe_create_connection(address: Any, *args: Any, **kwargs: Any) -> Any:
     return result
 
 
+def _observe_getaddrinfo(host: Any, port: Any, *args: Any, **kwargs: Any) -> Any:
+    result = _orig_getaddrinfo(host, port, *args, **kwargs)
+    try:
+        name = host.decode("ascii", "replace") if isinstance(host, (bytes, bytearray)) else str(host or "")
+        name = name.strip().lower().rstrip(".")
+        if name and _in_scope(name, None if port is None else str(port)):
+            with _remote_addresses_lock:
+                seen = _remote_addresses.get(name)
+                if seen is None and len(_remote_addresses) < _REMOTE_ADDRESS_HOSTS:
+                    seen = _remote_addresses.setdefault(name, set())
+                for item in result if seen is not None else ():
+                    sockaddr = item[4] if len(item) > 4 else None
+                    if len(seen) >= _REMOTE_ADDRESSES_PER_HOST:
+                        break
+                    if isinstance(sockaddr, tuple) and len(sockaddr) >= 2 and isinstance(sockaddr[0], str):
+                        seen.add(f"{sockaddr[0].split('%', 1)[0]}|{int(sockaddr[1])}")
+    except Exception:
+        pass
+    return result
+
+
+def _remote_addresses_for(hostname: Any) -> list[dict[str, Any]]:
+    name = str(hostname or "").strip().lower().rstrip(".")
+    with _remote_addresses_lock:
+        seen = sorted(_remote_addresses.get(name) or ())
+    out: list[dict[str, Any]] = []
+    for item in seen:
+        address, _, port = item.rpartition("|")
+        out.append({"address": address, "port": int(port)})
+    return out
+
+
+def _annotate_remote_addresses(calls: list[dict[str, Any]]) -> None:
+    for call in calls:
+        if not isinstance(call, dict) or "remote_addresses" in call:
+            continue
+        found = _remote_addresses_for(call.get("hostname"))
+        if found:
+            call["remote_addresses"] = found
+
+
 def _install_socket() -> None:
-    global _orig_socket_connect, _orig_socket_connect_ex, _orig_create_connection, _orig_ssl_connect
+    global _orig_socket_connect, _orig_socket_connect_ex, _orig_create_connection, _orig_ssl_connect, _orig_getaddrinfo
     if _orig_socket_connect is not None:
         return
     _orig_socket_connect = socket.socket.connect
@@ -1197,6 +1246,9 @@ def _install_socket() -> None:
             ssl_own = None
     except Exception:
         ssl_own = None
+    if _orig_getaddrinfo is None:
+        _orig_getaddrinfo = socket.getaddrinfo
+        socket.getaddrinfo = _observe_getaddrinfo  # type: ignore[assignment]
     socket.socket.connect = _observe_socket_connect  # type: ignore[method-assign]
     socket.socket.connect_ex = _observe_socket_connect_ex  # type: ignore[method-assign]
     socket.create_connection = _observe_create_connection  # type: ignore[assignment]
@@ -1208,7 +1260,7 @@ def _install_socket() -> None:
 
 
 def _uninstall_socket() -> None:
-    global _orig_socket_connect, _orig_socket_connect_ex, _orig_create_connection, _orig_ssl_connect
+    global _orig_socket_connect, _orig_socket_connect_ex, _orig_create_connection, _orig_ssl_connect, _orig_getaddrinfo
     try:
         if _orig_socket_connect is not None:
             socket.socket.connect = _orig_socket_connect
@@ -1218,8 +1270,11 @@ def _uninstall_socket() -> None:
             socket.create_connection = _orig_create_connection
         if _orig_ssl_connect is not None:
             ssl.SSLSocket.connect = _orig_ssl_connect
+        if _orig_getaddrinfo is not None:
+            socket.getaddrinfo = _orig_getaddrinfo  # type: ignore[assignment]
     except Exception:
         pass
+    _orig_getaddrinfo = None
     _orig_socket_connect = None
     _orig_socket_connect_ex = None
     _orig_create_connection = None
@@ -2121,6 +2176,7 @@ def _write_run_log() -> None:
     if not _calls or not _trace_id:
         return
     try:
+        _annotate_remote_addresses(_calls)
         home = os.environ.get("VANTIO_HOME") or os.path.join(os.path.expanduser("~"), ".vantio")
         runs = os.path.join(home, "runs")
         os.makedirs(runs, mode=0o700, exist_ok=True)
@@ -2181,6 +2237,8 @@ def install(trace_id: str) -> None:
         _depth += 1
         if _depth == 1:
             _calls.clear()
+            with _remote_addresses_lock:
+                _remote_addresses.clear()
             _started_ms = time.time()
             _trace_id = trace_id
             _load_policy()
