@@ -79,3 +79,64 @@ describe("reportAnomaly() transport rule", () => {
     ]);
   });
 });
+
+// The real fetch: the key must not follow a redirect to another origin.
+describe("reportAnomaly() and redirects", () => {
+  test("a redirect is not followed with the identity header", async () => {
+    const { createServer } = await import("node:http");
+    const targetHits: string[] = [];
+    const ingestHits: string[] = [];
+    const target = createServer((req, res) => {
+      targetHits.push(String(req.headers["x-vantio-identity"]));
+      res.writeHead(200);
+      res.end("{}");
+    });
+    await new Promise<void>((resolve) => target.listen(0, "127.0.0.1", () => resolve()));
+    const targetPort = (target.address() as { port: number }).port;
+    const ingest = createServer((req, res) => {
+      ingestHits.push(String(req.url));
+      req.resume();
+      req.on("end", () => {
+        res.writeHead(307, { location: `http://localhost:${targetPort}/collect` });
+        res.end();
+      });
+    });
+    await new Promise<void>((resolve) => ingest.listen(0, "127.0.0.1", () => resolve()));
+    const ingestPort = (ingest.address() as { port: number }).port;
+    const originalWarn = console.warn;
+    const warned: string[] = [];
+    console.warn = (...args: unknown[]) => { warned.push(args.map(String).join(" ")); };
+    try {
+      await withVantio(async () => {
+        await reportAnomaly({ target_host: "x" }, { ingestUrl: `http://127.0.0.1:${ingestPort}`, identity: "vk_test_redirect" });
+      });
+    } finally {
+      console.warn = originalWarn;
+      target.close();
+      ingest.close();
+    }
+    assert.deepEqual(ingestHits, ["/api/v1/ingest"]);
+    assert.deepEqual(targetHits, []);
+    assert.ok(warned.some((line) => line.includes("ingest request failed")), JSON.stringify(warned));
+  });
+
+  test("a plain 200 is still sent once with the identity header", async () => {
+    const { createServer } = await import("node:http");
+    const hits: string[] = [];
+    const ingest = createServer((req, res) => {
+      hits.push(String(req.headers["x-vantio-identity"]));
+      req.resume();
+      req.on("end", () => { res.writeHead(200); res.end("{}"); });
+    });
+    await new Promise<void>((resolve) => ingest.listen(0, "127.0.0.1", () => resolve()));
+    const port = (ingest.address() as { port: number }).port;
+    try {
+      await withVantio(async () => {
+        await reportAnomaly({ target_host: "x" }, { ingestUrl: `http://127.0.0.1:${port}`, identity: "vk_test_ok" });
+      });
+    } finally {
+      ingest.close();
+    }
+    assert.deepEqual(hits, ["vk_test_ok"]);
+  });
+});

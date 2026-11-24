@@ -267,6 +267,9 @@ export async function reportAnomaly(
       }),
       // Bound the request so a stalled ingest endpoint never hangs the agent.
       signal: AbortSignal.timeout(5000),
+      // The identity header carries the key. fetch would send it on to a
+      // redirect target, which can be another host or plain http.
+      redirect: "error",
     });
     if (!res.ok) {
       // Non-fatal but visible — silent 4xx/5xx made debugging impossible.

@@ -223,7 +223,7 @@ class ReportAnomalyTransportTests(unittest.IsolatedAsyncioTestCase):
         else:
             os.environ["VANTIO_CLOUD_INGEST"] = self._saved
 
-    def _fake_urlopen(self, req, *args, **kwargs):  # type: ignore[no-untyped-def]
+    def _fake_open(self, req, *args, **kwargs):  # type: ignore[no-untyped-def]
         self.opened.append(req.full_url)
         return mock.MagicMock()
 
@@ -231,8 +231,7 @@ class ReportAnomalyTransportTests(unittest.IsolatedAsyncioTestCase):
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             async with shield():
-                # Patched inside shield(), which installs its own urlopen wrapper.
-                with mock.patch("urllib.request.urlopen", side_effect=self._fake_urlopen):
+                with mock.patch("vantio.sdk._open_ingest", side_effect=self._fake_open):
                     await report_anomaly(target_host="x", ingest_url=url, api_key="vk_test_key")
         return [str(w.message) for w in caught]
 
@@ -265,6 +264,80 @@ class ReportAnomalyTransportTests(unittest.IsolatedAsyncioTestCase):
                 "http://[::1]:9/api/v1/ingest",
             ],
         )
+
+
+class ReportAnomalyRedirectTests(unittest.IsolatedAsyncioTestCase):
+    """The ingest request does not follow a redirect with the key (VAN-396)."""
+
+    def setUp(self) -> None:
+        self._saved = os.environ.get("VANTIO_CLOUD_INGEST")
+        os.environ["VANTIO_CLOUD_INGEST"] = "1"
+
+    def tearDown(self) -> None:
+        if self._saved is None:
+            os.environ.pop("VANTIO_CLOUD_INGEST", None)
+        else:
+            os.environ["VANTIO_CLOUD_INGEST"] = self._saved
+
+    async def test_a_redirect_is_not_followed_with_the_key(self) -> None:
+        import http.server
+        import threading
+
+        target_hits: list[str] = []
+        ingest_hits: list[str] = []
+
+        class Target(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args: object) -> None:
+                pass
+
+            def do_GET(self) -> None:  # noqa: N802
+                target_hits.append(str(self.headers.get("x-vantio-identity")))
+                self.send_response(200)
+                self.end_headers()
+
+            do_POST = do_GET  # noqa: N815
+
+        target = http.server.HTTPServer(("127.0.0.1", 0), Target)
+
+        class Ingest(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args: object) -> None:
+                pass
+
+            def do_POST(self) -> None:  # noqa: N802
+                self.rfile.read(int(self.headers.get("content-length") or 0))
+                ingest_hits.append(self.path)
+                self.send_response(302)
+                self.send_header("Location", f"http://localhost:{target.server_port}/collect")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+        ingest = http.server.HTTPServer(("127.0.0.1", 0), Ingest)
+        for server in (target, ingest):
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                async with shield():
+                    await report_anomaly(
+                        target_host="x",
+                        ingest_url=f"http://127.0.0.1:{ingest.server_port}",
+                        api_key="vk_test_redirect",
+                    )
+        finally:
+            for server in (target, ingest):
+                server.shutdown()
+                server.server_close()
+        self.assertEqual(ingest_hits, ["/api/v1/ingest"])
+        self.assertEqual(target_hits, [])
+        self.assertTrue(any("ingest request failed" in str(w.message) for w in caught))
+
+    async def test_a_plain_success_is_still_sent_once(self) -> None:
+        with MockServer() as ingest:
+            ingest.respond_with(200, {"status": 0})
+            async with shield():
+                await report_anomaly(target_host="x", ingest_url=ingest.url, api_key="vk_test_ok")
+            self.assertEqual(len(ingest.requests), 1)
+            self.assertEqual(ingest.requests[0].headers.get("X-Vantio-Identity"), "vk_test_ok")
 
 
 class HttpObserveTests(unittest.IsolatedAsyncioTestCase):

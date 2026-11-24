@@ -42,3 +42,67 @@ Mutation check: with both source files back on `main`, the Node test file fails 
 - `localhost` is trusted by name, as in `vantio export`. A hosts file that maps it elsewhere is not checked.
 - The README part of VAN-396 is a separate draft PR (public copy).
 - Ships only at the next SDK releases, with Zach's go.
+
+## Follow-up commit (Nov 24 review)
+
+Base: vantio-optics `ea12714`, vantio-open-core `5638b60` (the previous heads of this branch).
+
+**Finding.** The URL check covers only the URL the caller configured. Both SDKs then followed a redirect and sent the identity header, which holds `VANTIO_API_KEY`, to the new URL. That URL can be another host or plain http. Reproduced on `ea12714`: an ingest server on 127.0.0.1 answered 307 (Node) or 302 (Python) with a `Location` on another port, and the second server received `x-vantio-identity: vk_test_redirect_canary` in both SDKs.
+
+**Change.**
+
+- Node (`packages/vantio-agent-sdk/src/index.ts`): the ingest `fetch` uses `redirect: "error"`, so a redirect is a failed request and the existing non-fatal warning is printed.
+- Python (`packages/vantio-agent-sdk-py/vantio/sdk.py`): the request goes through `_open_ingest()`, an opener whose redirect handler raises `HTTPError` instead of following. The existing non-fatal warning is printed.
+
+**Tests.**
+
+- Node, `report-anomaly-transport.test.ts`: a 307 to another origin is not followed and the second server sees no request; a plain 200 is still sent once with the header (negative case).
+- Python, `test_sdk.py` `ReportAnomalyRedirectTests`: a 302 is not followed and the second server sees no request; a plain 200 is still sent once with the header (negative case).
+- The earlier transport tests now patch `vantio.sdk._open_ingest` instead of `urllib.request.urlopen`.
+
+Mutation check: with `index.ts` and `sdk.py` back on `ea12714`, both redirect tests fail and both plain-200 tests pass. On the old Python code the earlier transport tests error, because `_open_ingest` does not exist there.
+
+Run on the working tree of this commit:
+
+**vantio-optics**
+
+| Command | rc | Result |
+| --- | --- | --- |
+| `corepack pnpm install --frozen-lockfile` | 0 |  |
+| `pnpm --filter @vantio/cli run lint` | 0 |  |
+| `pnpm --filter @vantio/optics-mcp run lint` | 0 |  |
+| `pnpm --filter @vantio/agent-sdk run typecheck` | 0 |  |
+| `pnpm --filter @vantio/agent-sdk run typecheck:test` | 0 |  |
+| `pnpm --filter @vantio/cli run test` | 0 | 179 pass, 0 fail |
+| `pnpm --filter @vantio/optics-mcp run test` | 0 | 8 pass, 0 fail |
+| `pnpm --filter @vantio/agent-sdk run test` | 0 | 50 pass, 0 fail |
+| `pnpm --filter @vantio/agent-sdk run build` | 0 |  |
+| `node --test test/*.test.js` | 0 | 5 pass, 0 fail |
+| `node scripts/check_llms_full.mjs` | absent |  |
+| Python 3.10 `-m unittest discover -s packages/vantio-agent-sdk-py/tests -t packages/vantio-agent-sdk-py` | 0 | 133 run, OK (skipped=2) |
+| Python 3.11, same suite | 0 | 133 run, OK (skipped=2) |
+| Python 3.12, same suite | 0 | 133 run, OK (skipped=2) |
+| secret scan (`git grep` patterns from the repo rules) | 0 |  |
+| `llms-full.txt` against the manual pages | 0 |  |
+| `python3 scripts/check_open_core_drift.py <open-core mirror worktree>` | 1 | (only `packages/vantio-optics-mcp/src/server.js`, the known VAN-310 drift) |
+
+**vantio-open-core mirror**
+
+| Command | rc | Result |
+| --- | --- | --- |
+| `corepack pnpm install --frozen-lockfile` | 0 |  |
+| `pnpm --filter @vantio/cli run lint` | 0 |  |
+| `pnpm --filter @vantio/cli run test` | 0 | 179 pass, 0 fail |
+| `pnpm --filter @vantio/optics-mcp run lint` | 0 |  |
+| `pnpm --filter @vantio/optics-mcp test` | 0 | 5 pass, 0 fail |
+| Python 3.10 `-m unittest discover -s tests -t .` (in `packages/vantio-agent-sdk-py`) | 1 | 133 run, FAILED (failures=1, skipped=2) (fails: `test_wheel_and_sdist_runtime_sources_match`) |
+| Python 3.11, same suite | 1 | 133 run, FAILED (failures=1, skipped=2) (fails: `test_wheel_and_sdist_runtime_sources_match`) |
+| Python 3.12, same suite | 1 | 133 run, FAILED (failures=1, skipped=2) (fails: `test_wheel_and_sdist_runtime_sources_match`) |
+| `node scripts/release/ws11/verify.mjs --emit` | 0 |  |
+| `git status --porcelain` the same before and after `--emit` | 0 |  |
+
+### Gaps
+
+- CI did not run: the org billing lock (VAN-129).
+- A redirect that the ingest server really needs now fails. Nothing in this repository sends one.
+- Ships only at the next SDK releases, with Zach's go.

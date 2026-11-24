@@ -159,6 +159,21 @@ def _ingest_url_problem(raw: str) -> Optional[str]:
     return None
 
 
+class _RefuseRedirect(urllib.request.HTTPRedirectHandler):
+    """The ingest request carries the API key, so it never follows a redirect.
+
+    urllib would send the identity header on to the new URL, which can be
+    another host or plain http.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
+        raise urllib.error.HTTPError(req.full_url, code, "redirect refused", headers, fp)
+
+
+def _open_ingest(req: urllib.request.Request, timeout: float) -> Any:
+    return urllib.request.build_opener(_RefuseRedirect).open(req, timeout=timeout)
+
+
 async def report_anomaly(
     *,
     target_host: Optional[str] = None,
@@ -236,9 +251,7 @@ async def report_anomaly(
         loop = asyncio.get_running_loop()
         # Bound the blocking urlopen — without a timeout a stalled ingest endpoint
         # would hang the executor thread (and this coroutine) indefinitely.
-        await loop.run_in_executor(
-            None, functools.partial(urllib.request.urlopen, req, timeout=5)
-        )
+        await loop.run_in_executor(None, functools.partial(_open_ingest, req, 5))
     except Exception as exc:
         # Non-fatal — never crash the agent over an ingest failure. But NOT
         # silent: a bare `except: pass` here made a 403 (e.g. a free-tier key
