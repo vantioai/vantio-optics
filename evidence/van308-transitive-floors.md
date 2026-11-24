@@ -44,6 +44,20 @@ Each mutation was made in place, run, and restored from a copy.
 | version compare looks at the major only | negative test |
 | Restored | 6 pass |
 
+## Rebase onto #22 round 3
+
+Rebased onto #22 at `6417dca` (`@hono/node-server` floor 2.1.6, on `main` `8bee543`). The only conflict was `pnpm-lock.yaml`; it was regenerated with `pnpm install`. Against the old head, the lock differs only in `@hono/node-server` 2.1.5 → 2.1.11. Nothing in this PR's own change moved. No VM run. No workflow dispatch.
+
+| Command | rc | Result |
+| --- | --- | --- |
+| `pnpm install --frozen-lockfile` | 0 | |
+| `pnpm lint` | 0 | |
+| `pnpm test` | 0 | 249 pass, 1 skipped, 0 fail (#22 round 3: 243) |
+| `pnpm test:python` | 0 | OK, 2 skipped |
+| `pnpm build` | 0 | |
+| AGENTS.md secret scan | 0 | no pattern matched |
+| `pnpm audit --prod` | 1 | 1 high left: zod (VAN-308 part 2, #24). body-parser is gone. |
+
 ## Gaps
 
 - zod 3.25.76 (GHSA-mrhx-c7xc-m3w5, fixed only in zod 4) is not in this change. It is VAN-308 part 2.
