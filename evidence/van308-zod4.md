@@ -54,6 +54,20 @@ Each mutation was made in place, run, and restored from a copy.
 | test: one-argument detector counts nested commas | negative test (after adding the nested-object case; the first run missed it) |
 | Restored | 8 pass |
 
+## Rebase onto #23 after #22 round 3
+
+Rebased onto #23 at `af16eb8`, which sits on #22 round 3 (`@hono/node-server` floor 2.1.6, on `main` `8bee543`). `pnpm install --frozen-lockfile` passes without a lock change. The lock has zod 4.6.7 and `@hono/node-server` 2.1.11. No VM run. No workflow dispatch.
+
+| Command | rc | Result |
+| --- | --- | --- |
+| `pnpm install --frozen-lockfile` | 0 | |
+| `pnpm lint` | 0 | |
+| `pnpm test` | 0 | 257 pass, 1 skipped, 0 fail (#23: 249) |
+| `pnpm test:python` | 0 | OK, 2 skipped |
+| `pnpm build` | 0 | |
+| AGENTS.md secret scan | 0 | no pattern matched |
+| `pnpm audit --prod` | 0 | No known vulnerabilities found |
+
 ## Gaps
 
 - Major-version dependency change to a published package: council review and Zach's release go before any MCP release. A changelog or release note is public text and needs Kate. No README, doc or changelog was changed.
