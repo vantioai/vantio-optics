@@ -110,9 +110,8 @@ get_current_trace_id()  # None — outside shield() frame
 
 Scope: this API is part of Vantio Phantom Engine / Enterprise and requires a separately provisioned control-plane key. It is not part of free Vantio Optics, which runs local-first with no account and no API key.
 
-Fetches your tenant's governance policy from `GET /api/v1/config`. Fails open — if the
-control plane is unreachable, a permissive default policy is returned so your agent never
-stalls waiting for governance.
+It makes no request and does not send the key. It writes a warning to stderr and returns
+the default `VantioPolicy`, with `enforce` and `pii_redact` false.
 
 ```python
 from vantio import fetch_policy, redact_pii
@@ -192,7 +191,10 @@ async with shield():
 ```
 
 `report_anomaly()` must be called within a `shield()` context. It is a no-op unless
-`VANTIO_CLOUD_INGEST=true`. Non-fatal — never crashes the agent.
+`VANTIO_CLOUD_INGEST=true` and both an ingest URL (`ingest_url` or `VANTIO_INGEST_URL`) and
+an API key (`api_key` or `VANTIO_API_KEY`) are set. It refuses plain `http://` to another
+machine: use `https://`, or `http://` only to `localhost`, `127.0.0.1` or `::1`. Non-fatal:
+a failed or refused send only warns.
 
 ---
 
@@ -210,7 +212,7 @@ The variables below are for a separately provisioned Phantom Engine or Enterpris
 
 | Variable | Description |
 |---|---|
-| `VANTIO_INGEST_URL` | Control-plane base URL (default: `https://vantio.ai`) |
+| `VANTIO_INGEST_URL` | Control-plane base URL. `report_anomaly()` has no default and does nothing without it. |
 | `VANTIO_CLOUD_INGEST` | Set to `true` to enable cloud routing. `report_anomaly()` does nothing without this. |
 | `VANTIO_AUDIT_MODE` | Set to `1` to flag events as audit mode |
 
