@@ -64,3 +64,7 @@ Branch `engineering/van-191-claude-optics-publishing-docs-and-drift`, from `main
 - `vantio-app` `app/docs/page.tsx` troubleshooting paragraph (VAN-191 comment) is another repo; not touched.
 - The CLI usage string omitting `run --audit` (VAN-191 comment) is sealed CLI code; not touched.
 - The test checks two docs tables only, not prose.
+
+## llms-full.txt regenerated (VAN-382)
+
+`docs/products/optics/llms-full.txt` copies the manual pages, and this branch changed pages without updating the copy. It was rebuilt with `node scripts/check_llms_full.mjs --write` from vantio-optics #30 (VAN-382). Only llms-full.txt changed, and only on the page lines this branch already changed. With #30's check copied in, it exits 0 on this head (it exited 1 before). Secret scan rc 0. CI is blocked by the billing lock (VAN-129).
