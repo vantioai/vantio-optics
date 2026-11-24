@@ -63,15 +63,15 @@ await shield(async () => {
 });
 ```
 
-Requires `VANTIO_CLOUD_INGEST=true` and `VANTIO_API_KEY` to be set. Non-fatal — telemetry failures never crash your agent.
+It sends only when an ingest URL is set: pass `ingestUrl`, or set `VANTIO_INGEST_URL` together with `VANTIO_CLOUD_INGEST=true`. With neither, it does nothing. It sends `VANTIO_API_KEY` (or `VANTIO_IDENTITY`) in the `x-vantio-identity` header, or `"unknown"` when neither is set. It refuses plain `http://` to another machine: use `https://`, or `http://` only to `localhost`, `127.0.0.1` or `::1`. Non-fatal: a failed or refused send only logs a warning.
 
 ---
 
 ## Policy & redaction (Vantio Phantom Engine)
 
-Enforcement policy is served by the Phantom Engine control plane; the SDK applies it **locally** — Vantio is not a network proxy. The SDK ships two building blocks so you can fetch and enforce that policy yourself.
+The SDK does not load or apply a policy. Vantio is not a network proxy.
 
-### `fetchPolicy(apiKey, opts?)` — load the cloud-managed policy
+### `fetchPolicy(apiKey, opts?)` — returns the default policy
 
 Scope: this API is part of Vantio Phantom Engine / Enterprise and requires a separately provisioned control-plane key. It is not part of free Vantio Optics, which runs local-first with no account and no API key.
 
@@ -83,7 +83,7 @@ const policy: VantioPolicy = await fetchPolicy(process.env.VANTIO_API_KEY!);
 //   blocked_hosts, max_request_bytes, spend_cap_usd }
 ```
 
-GETs `/api/v1/config` with the `x-vantio-identity` header. **Fails open:** on any error — network failure, non-2xx, malformed body, or timeout — it returns a permissive copy of `DEFAULT_POLICY` so an unreachable control plane can never block your agent. Options: `ingestUrl`, `timeoutMs` (default 5000), `signal`.
+It makes no request and does not send the key. It logs a warning and returns a copy of `DEFAULT_POLICY` with `enforce` and `redact_pii` false. The options (`ingestUrl`, `timeoutMs`, `signal`) are accepted and not used.
 
 ### `redactPII(text, piiTypes?)` — strip PII locally
 
