@@ -152,7 +152,7 @@ Optics is free, local-first observability for supported AI traffic. It records t
 
 Optics observes. Phantom Engine is the separate product that enforces. This manual stops at Optics.
 
-The installable versions on 2026-11-19 are `@vantio/cli@0.3.27` and `vantio-agent-sdk==3.1.2`, the same as this source tree. See [VERSION-METADATA.json](VERSION-METADATA.json).
+The installable versions on 2026-11-20 are `@vantio/cli@0.3.27` and `vantio-agent-sdk==3.1.2`. This source tree is CLI 0.3.28 and Python 3.1.3, which are not published. See [VERSION-METADATA.json](VERSION-METADATA.json).
 
 ## Who this is for
 
@@ -285,7 +285,7 @@ FILE: QUICKSTART.md
 
 Optics is local. A fresh CLI install needs no account and no API key. The record is metadata: host, size, timing, and process. Prompts and completions are absent from the record.
 
-Versions, checked on 2026-11-19: install `@vantio/cli@0.3.27` and, for Python, `vantio-agent-sdk==3.1.2`. This git tree is CLI 0.3.27 and Python 3.1.2. Details: [INSTALLATION.md](INSTALLATION.md).
+Versions, checked on 2026-11-20: install `@vantio/cli@0.3.27` and, for Python, `vantio-agent-sdk==3.1.2`. This git tree is CLI 0.3.28 and Python 3.1.3, which are not published. Details: [INSTALLATION.md](INSTALLATION.md).
 
 ## 1. Install the CLI
 
@@ -382,7 +382,7 @@ Free Optics needs no account and no API key. The CLI does not read a saved key f
 | --- | --- |
 | Package | `@vantio/cli` |
 | Public version | `0.3.27` (npm latest on 2026-11-19) |
-| Source in this commit | `0.3.27`, the same bytes as the npm package |
+| Source in this commit | `0.3.28`, not the npm package |
 | Command | `vantio` |
 | Engine | Node.js `>=18.3.0` |
 | License | MIT |
@@ -469,7 +469,7 @@ FILE: NODE-GUIDE.md
 
 # Node guide
 
-This page is `@vantio/cli@0.3.27`. The CLI in this source tree is that frozen version.
+This page is `@vantio/cli@0.3.27`, the published release. The CLI in this source tree is 0.3.28, which is not published.
 
 ## Attach
 
@@ -1511,10 +1511,10 @@ This manual is version 1. It is a docs set. It does not bump `@vantio/cli`, `van
 
 | You installed | Read |
 | --- | --- |
-| `@vantio/cli@0.3.27` | The published CLI is 0.3.27, the same as this tree. Node pages that name 0.3.24 describe that older release. |
+| `@vantio/cli@0.3.27` | The published CLI is 0.3.27. This tree is 0.3.28, which is not published. Node pages that name 0.3.24 describe that older release. |
 | `vantio-agent-sdk==3.1.2` | [PYTHON-GUIDE.md](PYTHON-GUIDE.md) for the current PyPI release. |
 | `vantio-agent-sdk==3.0.14` | The 3.0.14 sections of [PYTHON-GUIDE.md](PYTHON-GUIDE.md). That pin is older than PyPI latest. |
-| A checkout of this repository | `pyproject.toml` says 3.1.2. That string is source. `pip install` does not install it. |
+| A checkout of this repository | `pyproject.toml` says 3.1.3. That string is source. `pip install` does not install it. |
 
 Package changelogs live next to the packages (`packages/vantio-agent-sdk-py/CHANGELOG.md`). This repository's history starts fresh and does not contain the older release tags. When a changelog line and the published package disagree, the published package wins.
 
@@ -1555,7 +1555,7 @@ FILE: VERSION-METADATA.json
   "manual_version": 1,
   "audience": "public",
   "contract_version": "unstable-pre-1.0",
-  "registry_checked_utc": "2026-11-19T05:40:00Z",
+  "registry_checked_utc": "2026-11-20T16:17:07Z",
   "copied_from": {
     "repository": "https://github.com/vantioai/vantio-open-core",
     "commit": "75f32310d03a3020b56fd565109ae1f2a19a23bc",
@@ -1572,8 +1572,8 @@ FILE: VERSION-METADATA.json
     }
   },
   "source_tree": {
-    "@vantio/cli": "0.3.27",
-    "vantio-agent-sdk": "3.1.2",
+    "@vantio/cli": "0.3.28",
+    "vantio-agent-sdk": "3.1.3",
     "@vantio/agent-sdk": "0.2.4",
     "@vantio/optics-mcp": "0.1.2"
   },
@@ -1581,6 +1581,7 @@ FILE: VERSION-METADATA.json
     "Unpinned npm install -g @vantio/cli resolves to 0.3.27.",
     "Unpinned pip install vantio-agent-sdk resolves to 3.1.2.",
     "Python 3.0.14 and 3.1.1 remain on PyPI and are not the latest release.",
-    "@vantio/cli 0.3.27 has registry signatures and no provenance attestation. Its registry tarball is byte-identical to open-core artifacts/sealed/vantio-cli-0.3.27.tgz."
+    "@vantio/cli 0.3.27 has registry signatures and no provenance attestation. Its registry tarball is byte-identical to open-core artifacts/sealed/vantio-cli-0.3.27.tgz.",
+    "This tree is @vantio/cli 0.3.28 and vantio-agent-sdk 3.1.3. Both are sealed in vantio-open-core and not published."
   ]
 }
