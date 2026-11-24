@@ -78,7 +78,7 @@ pip install 'vantio-agent-sdk==3.1.2'
 vantio run python agent.py
 ```
 
-With the SDK installed, `vantio run python` injects the wrap (`sitecustomize` on `PYTHONPATH`) so you do not have to edit the script. Without the SDK, the prefix does not intercept. `shield()` is the in-process alternative when you want a trace id inside the process.
+With the SDK installed, `vantio run python` injects the wrap (`sitecustomize` on `PYTHONPATH`) so you do not have to edit the script. Without the SDK, the prefix does not record HTTP calls. MCP awareness still checks JSON-RPC lines written to child processes. `shield()` is the in-process alternative when you want a trace id inside the process.
 
 Your code doesn't change. Your agent runs normally. Observed calls are recorded on this machine.
 
@@ -94,7 +94,7 @@ vantio run --json node agent.js      # unstable JSON run record on stdout
 vantio run --mcp-enforce node agent.js
 ```
 
-`vantio run` loads in-process MCP awareness for Node, and the same library for Python child-process stdio. The default is observe, and injection and rug-pull stay on log. `--mcp-enforce` withholds inside that process. `VANTIO_MCP_AWARENESS=off` does not load it. The path does not add a proxy process. Payload text is not stored. This is not Phantom Engine. Host attachment remains a later step.
+`vantio run` loads in-process MCP awareness for Node, and the same library for Python child-process stdio. The default is observe, and injection and rug-pull stay on log. `--mcp-enforce` withholds inside that process. For Python children it covers `Popen.stdin.write`, `writelines`, `communicate()` and `subprocess.run(input=...)`. It does not see bytes written straight to the pipe with `os.write`, or children started with `asyncio`. Only lines that start with `{` are held and checked; other child input passes through unchanged. `VANTIO_MCP_AWARENESS=off` does not load it. The path does not add a proxy process. Payload text is not stored. This is not Phantom Engine. Host attachment remains a later step.
 
 **`--json`** on `run`, `demo`, `status`, `discover`, `prove`, `search`, `tail`, `diff`, `coverage`, `destinations`, and `export` prints `"schema_status": "unstable-pre-1.0"`. That shape may change without notice. Field mapping to OpenTelemetry GenAI terms is documented in [docs/optics-otel-mapping.md](../../docs/optics-otel-mapping.md). `vantio export --otlp` sends OTLP/HTTP JSON. `vantio export --otlp-grpc` sends the same fields as unary OTLP/gRPC over HTTP/2. Optics does not start a collector.
 
