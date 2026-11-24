@@ -28,7 +28,7 @@ const { parseArgs } = require("node:util");
 
 const { SCHEMA_STATUS, normalizeHttpStatus, withSchema } = require("./optics-cx.cjs");
 const { LLM_HOSTS, catalogInScope } = require("./llm-hosts.cjs");
-const { discoverUncovered } = require("./optics-proc.cjs");
+const { canonicalIp, discoverUncovered } = require("./optics-proc.cjs");
 const { deliverOtlpGrpc } = require("./optics-otlp-grpc.cjs");
 
 const COVERAGE_SCHEMA = "vantio.optics.coverage.v1";
@@ -1816,6 +1816,16 @@ function recordWrappedRun(input) {
   }
   const calls = existing && Array.isArray(existing.calls) ? existing.calls.map((call) => ({ ...call })) : [];
   const seenDest = new Set(calls.map((call) => normalizeHost(call.hostname)).filter(Boolean));
+  // Sockets that a call above already records by name. The interceptor and
+  // the Python SDK list them as remote_addresses (VAN-407).
+  const recordedSockets = new Set();
+  for (const call of calls) {
+    if (!call || !Array.isArray(call.remote_addresses)) continue;
+    for (const remote of call.remote_addresses) {
+      if (!remote || typeof remote.address !== "string" || !Number.isInteger(remote.port)) continue;
+      recordedSockets.add(`${canonicalIp(remote.address)}|${remote.port}`);
+    }
+  }
   const byPid = new Map();
   for (const proc of input.processes || []) {
     if (proc && Number.isInteger(proc.pid)) byPid.set(proc.pid, proc);
@@ -1827,6 +1837,7 @@ function recordWrappedRun(input) {
   for (const conn of ordered) {
     const destination = normalizeHost(conn.destination) || cleanToken(conn.destination, 253);
     if (!destination || seenDest.has(destination)) continue;
+    if (typeof conn.ip === "string" && recordedSockets.has(`${canonicalIp(conn.ip)}|${conn.port}`)) continue;
     seenDest.add(destination);
     calls.push({
       hostname: destination,

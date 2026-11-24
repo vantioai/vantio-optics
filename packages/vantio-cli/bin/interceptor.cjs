@@ -171,6 +171,34 @@ const USD_PER_BYTE = (5 / 1_000_000) / 4;
 
 let spentUsd = 0;
 const _calls = [];
+// Socket addresses this process connected to for in-scope hosts, as
+// "address|port" per host. `vantio run` reads sockets from /proc and sees only
+// the IP. With these it can tell the socket of a call that is already
+// recorded here by name (VAN-407).
+const _remoteAddresses = new Map();
+const REMOTE_ADDRESSES_PER_HOST = 64;
+const REMOTE_ADDRESS_HOSTS = 256;
+
+function noteRemoteAddress(hostname, address, port) {
+  const host = String(hostname || "").toLowerCase().replace(/\.$/, "");
+  if (!host || typeof address !== "string" || !address || !Number.isInteger(port)) return;
+  let seen = _remoteAddresses.get(host);
+  if (!seen) {
+    if (_remoteAddresses.size >= REMOTE_ADDRESS_HOSTS) return;
+    seen = new Set();
+    _remoteAddresses.set(host, seen);
+  }
+  if (seen.size < REMOTE_ADDRESSES_PER_HOST) seen.add(`${address.split("%")[0]}|${port}`);
+}
+
+function remoteAddressesFor(hostname) {
+  const seen = _remoteAddresses.get(String(hostname || "").toLowerCase().replace(/\.$/, ""));
+  if (!seen || seen.size === 0) return null;
+  return [...seen].sort().map((item) => {
+    const cut = item.lastIndexOf("|");
+    return { address: item.slice(0, cut), port: Number(item.slice(cut + 1)) };
+  });
+}
 const _pushCall = _calls.push.bind(_calls);
 const LIVE_NOTED = Symbol.for("vantio.liveNoted");
 
@@ -1383,10 +1411,24 @@ globalThis.fetch = function vantioFetch(input, init) {
     return orig.apply(socket, args);
   }
 
+  // Every socket to an in-scope host notes its remote address once it
+  // connects, whichever client opened it (VAN-407).
+  function noteSocketAddress(socket, args) {
+    const dest = destFromNetArgs(args);
+    if (dest.ipc || !dest.hostname || net.isIP(dest.hostname)) return;
+    if (!inScope(dest.hostname, dest.port)) return;
+    if (!socket || typeof socket.once !== "function") return;
+    const hostname = dest.hostname;
+    socket.once("connect", () => {
+      try { noteRemoteAddress(hostname, socket.remoteAddress, socket.remotePort); } catch { /* recording only */ }
+    });
+  }
+
   function wrapConnectProto(proto) {
     if (!proto || typeof proto.connect !== "function" || proto.__vantioConnectPatched) return;
     const orig = proto.connect;
     proto.connect = function vantioSocketConnect(...args) {
+      try { noteSocketAddress(this, args); } catch { /* recording must not change the connect */ }
       try {
         return gateConnect(this, orig, args);
       } catch {
@@ -2101,6 +2143,7 @@ process.on("exit", () => {
         redactions:    call.redactions || 0,
         error:         call.error || null,
         error_class:   call.error_class || null,
+        ...(remoteAddressesFor(call.hostname) ? { remote_addresses: remoteAddressesFor(call.hostname) } : {}),
       })),
       summary: {
         total_calls:   _calls.length,
