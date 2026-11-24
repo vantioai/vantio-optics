@@ -1804,10 +1804,53 @@ function runLogFile(traceId) {
   return join(primaryHome(), "runs", `${safe}.json`);
 }
 
+// The same lock the interceptor and the Python SDK take on <trace>.json
+// (VAN-387): open <path>.lock with O_EXCL, take over a lock older than 10 s,
+// and go on without it after 2 s. Without it a child that exits while the
+// wrapper writes could lose its calls, or the wrapper its socket rows.
+const RUN_LOG_LOCK_WAIT_MS = 2000;
+const RUN_LOG_LOCK_STALE_MS = 10000;
+
+function withRunLogLock(path, fn) {
+  const lock = `${path}.lock`;
+  const deadline = Date.now() + RUN_LOG_LOCK_WAIT_MS;
+  let fd = null;
+  for (;;) {
+    try {
+      fd = openSync(lock, "wx", 0o600);
+      break;
+    } catch (err) {
+      if (!err || err.code !== "EEXIST") break;
+      try {
+        if (Date.now() - statSync(lock).mtimeMs > RUN_LOG_LOCK_STALE_MS) {
+          rmSync(lock, { force: true });
+          continue;
+        }
+      } catch {
+        continue;
+      }
+      if (Date.now() >= deadline) break;
+      try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10); } catch { /* retry at once */ }
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    if (fd != null) {
+      try { closeSync(fd); } catch { /* closed */ }
+      try { rmSync(lock, { force: true }); } catch { /* gone */ }
+    }
+  }
+}
+
 function recordWrappedRun(input) {
-  const traceId = input.traceId;
-  const path = runLogFile(traceId);
+  const path = runLogFile(input.traceId);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  return withRunLogLock(path, () => recordWrappedRunLocked(input, path));
+}
+
+function recordWrappedRunLocked(input, path) {
+  const traceId = input.traceId;
   let existing = null;
   if (existsSync(path)) {
     const loaded = readJsonObject(path);
@@ -1876,6 +1919,11 @@ function recordWrappedRun(input) {
     plane: "optics",
     data_note: "Metadata only. Prompts and completions are never stored.",
     trace_id: traceId,
+    // A process of the run that exits later merges only into a log with the
+    // same run id, so the wrapper's log carries it too.
+    ...(!(existing && existing.run_id) && typeof input.runId === "string" && input.runId
+      ? { run_id: input.runId.slice(0, 128) }
+      : {}),
     program: (existing && existing.program) || root.program,
     pid: (existing && existing.pid) || root.pid,
     ppid: existing && existing.ppid != null ? existing.ppid : root.ppid,
@@ -1891,7 +1939,9 @@ function recordWrappedRun(input) {
     }),
     socket_observation: "read_only_proc",
   });
-  writeJsonAtomic(path, log);
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(log, null, 2)}\n`, { mode: 0o600 });
+  renameSync(tmp, path);
   return { path, log };
 }
 

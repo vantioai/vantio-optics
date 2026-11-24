@@ -430,6 +430,7 @@ function runCommand(rest) {
     try {
       recordWrappedRun({
         traceId: runTraceId,
+        runId,
         program: basename(program),
         pid: child.pid || null,
         ppid: process.pid,
