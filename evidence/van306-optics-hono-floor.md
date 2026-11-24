@@ -87,10 +87,48 @@ Node 22.23.5, pnpm 11.13.0, Python 3.12.3 venv with requests 2.34.2, httpx 0.28.
 | `rangeFloor` takes the first number of any range | negative test |
 | Restored | 3 pass |
 
+## Round 3: @hono/node-server floor 2.1.6, rebased onto main
+
+Base for this round: vantio-optics `main` at `8bee543` (VAN-310 landed as #25). Commit `62af68b`. No VM run. No workflow dispatch. Nothing tagged or published.
+
+### Finding
+
+`pnpm audit --prod` on round 2 listed two moderate `@hono/node-server` advisories: GHSA-qv5m-9pm6-hqp3 (new) and GHSA-jpvv-r467-5p4w, whose affected range now runs to 2.1.5. The lock resolved 2.1.5.
+
+### What changed
+
+- `pnpm-workspace.yaml`: override `'@hono/node-server@<2.1.6': ^2.1.6` (was `<2.1.3`). The lock now resolves 2.1.11.
+- `advisory_pins_hono.test.js`: the floor is 2.1.6, and the negative case now expects 2.1.5 to count as vulnerable.
+- Rebased onto `main` `8bee543`. No conflicts.
+
+### Commands
+
+Node 22.23.5, pnpm 11.13.0, Python 3.12.3 venv, same as round 2. Base is `main` `8bee543` on this host, same commands.
+
+| Command | rc (this round) | rc (`8bee543`) | Result |
+| --- | --- | --- | --- |
+| `pnpm install --frozen-lockfile` | 0 | 0 | |
+| `pnpm lint` | 0 | 0 | |
+| `pnpm test` | 0 | 0 | 243 pass, 1 skipped, 0 fail (base 234, 1 skipped) |
+| `pnpm test:python` | 0 | 0 | OK, 2 skipped |
+| `pnpm build` | 0 | 0 | |
+| AGENTS.md secret scan | 0 | 0 | no pattern matched |
+| `pnpm audit --prod` | 1 | 1 | 2 high left: body-parser (VAN-308 part 1, #23) and zod (VAN-308 part 2, #24). No `@hono/node-server` advisory. |
+| `python3 scripts/check_open_core_drift.py <open-core #426 7bda66a>` | 1 | 1 (vs open-core `main`) | differs only in `packages/vantio-optics-mcp/src/server.js`, which is VAN-310: already on optics `main`, waiting on open-core #429 |
+
+### Mutation checks
+
+| Mutation | Result |
+| --- | --- |
+| Lock back to `@hono/node-server` 2.1.5 | 1 fail |
+| Override back to `<2.1.3` | 1 fail |
+| Restored | pass |
+
 ## Gaps
 
 - The open-core drift check in CI skips without `OPEN_CORE_READ_TOKEN`, so a green drift job there is not a comparison. The drift results above came from local open-core checkouts.
 - Dependabot alerts may be off for this repository (VAN-231), so this was checked against the advisory ranges, not GitHub's alert view.
-- zod 3.25.76 and body-parser 2.3.0 still have open advisories here: VAN-308.
+- zod 3.25.76 and body-parser 2.3.0 still have open advisories here: VAN-308 (#23, #24, stacked on this PR).
 - Raising `engines.node` to `>=20` is user-facing for the next MCP release. It needs council review and Zach's release go; any release note or README line about it also needs Kate. No README, doc or changelog was changed here. Not tested on Node 18 or 20; all runs used Node 22.23.5, as CI does.
-- The optics-mcp server reports version `0.1.0` in its handshake while the package is 0.1.2. Not changed here (VAN-310).
+- open-core #426 still floors `@hono/node-server` at 2.1.3. Its lock resolves 2.1.9, so it is not affected today, but a lock refresh could go back to 2.1.3–2.1.5. Raising it to 2.1.6 there costs new CI runs on open-core #426, #427 and #428, so it is left for the next push to #426. The drift check does not compare `pnpm-workspace.yaml` or tests, so this does not show as drift.
+- The drift check against open-core flags `src/server.js` until open-core #429 (VAN-310) lands. That drift is already on optics `main`, not from this PR.
