@@ -1634,16 +1634,9 @@ globalThis.fetch = function vantioFetch(input, init) {
           text = buf.slice(0, n).toString("utf8");
         }
       } else {
-        const st = statSync(path);
-        if (!st.isFile()) return [];
-        const fd = openSync(String(path), "r");
-        try {
-          const buf = Buffer.alloc(Math.min(Number(st.size) || 0, cap));
-          const n = readSync(fd, buf, 0, buf.length, 0);
-          text = buf.slice(0, n).toString("utf8");
-        } finally {
-          closeSync(fd);
-        }
+        const raw = readRegularFile(path, cap);
+        if (raw == null) return [];
+        text = raw.toString("utf8");
       }
     } catch {
       return [];
@@ -1669,9 +1662,29 @@ globalThis.fetch = function vantioFetch(input, init) {
     "--data-raw": false,
   };
 
+  // The child curl or wget reads this file after we do. A FIFO, a device or a
+  // socket would block the whole process here (or be drained before the child
+  // sees it), so open it non-blocking and read only a regular file (VAN-394).
+  function readRegularFile(path, cap) {
+    const { constants } = require("node:fs");
+    const flags = constants.O_RDONLY | (constants.O_NONBLOCK || 0) | (constants.O_NOCTTY || 0);
+    const fd = openSync(String(path || ""), flags);
+    try {
+      const st = fstatSync(fd);
+      if (!st.isFile()) return null;
+      const buf = Buffer.alloc(Math.min(Number(st.size) || 0, cap));
+      const n = readSync(fd, buf, 0, buf.length, 0);
+      return buf.slice(0, n);
+    } finally {
+      closeSync(fd);
+    }
+  }
+
   function urlFromCurlConfig(path) {
     try {
-      const text = readFileSync(String(path || ""), "utf8");
+      const raw = readRegularFile(path, 64 * 1024);
+      if (raw == null) return null;
+      const text = raw.toString("utf8");
       for (const line of text.split(/\r?\n/)) {
         const s = line.trim();
         if (!s || s.startsWith("#")) continue;

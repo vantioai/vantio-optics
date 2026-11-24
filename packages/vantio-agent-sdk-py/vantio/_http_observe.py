@@ -1663,12 +1663,10 @@ def _urls_from_list_file(path: str, stdin_size: int = 0, kwargs: Optional[dict[s
                 raw = os.pread(fd, min(int(stdin_size) or 0, cap), 0)
                 text = raw.decode("utf-8", "replace")
         else:
-            fd = os.open(str(path), os.O_RDONLY)
-            try:
-                raw = os.read(fd, cap)
-                text = raw.decode("utf-8", "replace")
-            finally:
-                os.close(fd)
+            raw = _read_regular_file(str(path), cap)
+            if raw is None:
+                return []
+            text = raw.decode("utf-8", "replace")
     except Exception:
         return []
     urls: list[str] = []
@@ -1695,24 +1693,45 @@ _CURL_DATA_AT_FILE = {
 }
 
 
+_CLI_CONFIG_CAP = 64 * 1024
+
+
+def _read_regular_file(path: str, cap: int) -> Optional[bytes]:
+    """Read up to cap bytes of a regular file, or return None.
+
+    The child curl or wget reads this file after we do. A FIFO, a device or a
+    socket would block here (or be drained before the child sees it), so the
+    open is non-blocking and anything but a regular file is skipped (VAN-394).
+    """
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOCTTY", 0)
+    fd = os.open(path, flags)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        return os.read(fd, cap)
+    finally:
+        os.close(fd)
+
+
 def _url_from_curl_config(path: str) -> Optional[str]:
     try:
-        with open(path, encoding="utf-8", errors="replace") as fh:
-            for line in fh:
-                s = line.strip()
-                if not s or s.startswith("#"):
-                    continue
-                lower = s.lower()
-                if not lower.startswith("url"):
-                    continue
-                rest = s[3:].lstrip()
-                if rest.startswith("="):
-                    rest = rest[1:].strip()
-                rest = rest.strip("\"'")
-                if rest.startswith("http://") or rest.startswith("https://"):
-                    return rest
+        raw = _read_regular_file(str(path), _CLI_CONFIG_CAP)
     except Exception:
         return None
+    if raw is None:
+        return None
+    for line in raw.decode("utf-8", "replace").splitlines():
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        if not s.lower().startswith("url"):
+            continue
+        rest = s[3:].lstrip()
+        if rest.startswith("="):
+            rest = rest[1:].strip()
+        rest = rest.strip("\"'")
+        if rest.startswith("http://") or rest.startswith("https://"):
+            return rest
     return None
 
 
