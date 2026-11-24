@@ -93,6 +93,10 @@ Checked on 2026-11-19 by running the same `https.get` agent under npm CLI 0.3.24
 
 For `node:http`, `node:https` and `node:http2` calls, 0.3.27 fills `method`, `path` (no query string), `status`, `ok` from the status, `content_type`, `bytes` from `Content-Length`, and `duration_ms`. A request that fails before a response sets `ok: false`, `error` to the error code, and `error_class`. 0.3.24 wrote `method: "REQUEST"`, `path: null`, `status: null` and `ok: true` for the same calls.
 
+## Roadmap: `remote_addresses` on a call
+
+Not in a published release. In the source after VAN-407, a Node or Python call to an in-scope host can carry `remote_addresses`, for example `[{"address": "192.0.2.2", "port": 443}]`. Node lists the socket addresses that process connected to for that host. Python lists the addresses DNS returned for it. `vantio run` uses the list so that the socket of a recorded call is not written a second time as a `proc_socket` row under its IP. A call with no known address has no `remote_addresses` key.
+
 ## Published Python 3.0.14 envelope
 
 | Field | Value |
