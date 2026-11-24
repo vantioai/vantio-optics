@@ -370,9 +370,12 @@ function runCommand(rest) {
 
   // One stable trace id for this `vantio run`.
   const runTraceId = process.env.VANTIO_TRACE_ID || `0x${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+  // Every process of this run merges into one run log only when it carries this id.
+  const runId = process.env.VANTIO_RUN_ID || randomUUID();
 
   const childEnv = Object.assign(Object.create(null), process.env, {
     VANTIO_TRACE_ID: runTraceId,
+    VANTIO_RUN_ID: runId,
     ...(values.audit     ? { VANTIO_AUDIT_MODE: "1" } : {}),
     ...(values.summary   ? { VANTIO_SUMMARY:    "1" } : {}),
     ...(values.json      ? { VANTIO_JSON:       "1" } : {}),
@@ -1355,7 +1358,15 @@ async function tailCommand(args) {
   };
 
   try {
-    const watcher = logPath ? watch(logPath, { persistent: true }, () => refresh()) : null;
+    // Watch the folder, not the file: a run log is replaced by rename when
+    // another process of the run merges into it, and a file watch would stay
+    // on the old copy.
+    const logName = logPath ? basename(logPath) : null;
+    const watcher = logPath
+      ? watch(dirname(logPath), { persistent: true }, (_event, name) => {
+        if (!name || String(name) === logName) refresh();
+      })
+      : null;
     await new Promise((resolve) => {
       const stop = () => {
         stopLive();
