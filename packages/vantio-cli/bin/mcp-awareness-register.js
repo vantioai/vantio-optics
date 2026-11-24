@@ -329,9 +329,17 @@ function canRead(stream) {
   return Boolean(stream && typeof stream.on === "function");
 }
 
+// Observe treats a child as an MCP server only once the workload has sent it
+// a JSON-RPC frame: an MCP client always opens with initialize. Until then the
+// child's lines and size gaps are not records, so a child that prints JSON
+// logs or a large file is not shown as MCP traffic (VAN-399).
 function attachObserve(runtime, writeLog, child, meta) {
-  if (piped(child.stdin)) wrapWrite(child.stdin, (buf) => observeChunks(runtime, writeLog, meta, buf));
-  if (piped(child.stdout)) armTap(runtime, writeLog, child.stdout, meta);
+  meta.rpcSeen = false;
+  const childLog = (record) => {
+    if (meta.rpcSeen) writeLog(record);
+  };
+  if (piped(child.stdin)) wrapWrite(child.stdin, (buf) => observeChunks(runtime, childLog, meta, buf));
+  if (piped(child.stdout)) armTap(runtime, childLog, child.stdout, meta);
 }
 
 function observeChunks(runtime, writeLog, meta, buf) {
@@ -347,6 +355,7 @@ function observeChunks(runtime, writeLog, meta, buf) {
   while (newline >= 0) {
     const line = state.pending.subarray(0, newline + 1);
     state.pending = state.pending.subarray(newline + 1);
+    if (looksLikeJsonRpc(line)) state.rpcSeen = true;
     const out = runtime.observeBuffer(line, {
       transport: "stdio",
       direction: "client_to_server",
