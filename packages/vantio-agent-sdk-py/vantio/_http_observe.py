@@ -1310,13 +1310,32 @@ def _observe_http_client_getresponse(self: Any, *args: Any, **kwargs: Any) -> An
     pending = getattr(self, "_vantio_pending", None)
     try:
         resp = _orig_http_getresponse(self, *args, **kwargs)
-    except Exception:
+    except Exception as exc:
         self._vantio_pending = None
+        # The record was written when the request was sent. Without this it
+        # would stay ok=True for a call the user saw fail (VAN-387).
+        if pending and isinstance(pending.get("rec"), dict):
+            try:
+                kind, phrase = classify_exception(exc)
+                rec = pending["rec"]
+                rec["ok"] = False
+                rec["duration_ms"] = _duration_ms(pending.get("t0") or time.time())
+                rec["error_class"] = type(exc).__name__
+                rec["failure_kind"] = kind
+                rec["failure_response"] = phrase
+                if kind != "wrapped":
+                    rec["error"] = "network_error"
+                apply_customer_outcome(rec)
+            except Exception:
+                pass
         raise
     self._vantio_pending = None
     if pending and isinstance(pending.get("rec"), dict):
         status = getattr(resp, "status", None)
         rec = pending["rec"]
+        # Time to the response headers, not just to the end of the send.
+        if pending.get("t0"):
+            rec["duration_ms"] = _duration_ms(pending["t0"])
         rec["status"] = _normalize_http_status(status)
         rec["ok"] = _ok_for_http_status(status)
         rec["applicationStatus"] = _application_status(status)
