@@ -716,12 +716,52 @@ globalThis.fetch = function vantioFetch(input, init) {
       mediation: "undici_dispatch",
     };
 
-    _calls.push(Object.assign({}, baseCall, { action: "OBSERVED" }));
+    const record = Object.assign({}, baseCall, { action: "OBSERVED" });
+    const startedMs = Date.now();
+    _calls.push(record);
     report({
       target_host: hostname, pid: process.pid, action_taken: "OBSERVED",
       timestamp_ns: Date.now() * 1e6, bytes_severed: 0, mediation: "undici_dispatch",
     });
-    return launchDispatch(dispatcher, orig, opts, handler, hostname);
+    return launchDispatch(dispatcher, orig, opts, observeDispatchHandler(handler, record, startedMs), hostname);
+  }
+
+  // pool.stream / pipeline / connect / raw dispatch never reach a Response,
+  // so the status comes from the handler's own callbacks (VAN-387). The
+  // handler is changed in place, the same way attachTunnelHandler does.
+  function observeDispatchHandler(handler, record, startedMs) {
+    if (!handler || typeof handler !== "object" || handler.__vantioStatusWrapped) return handler;
+    try {
+      handler.__vantioStatusWrapped = true;
+      const wrap = (name, before) => {
+        if (typeof handler[name] !== "function") return;
+        const orig = handler[name];
+        handler[name] = function vantioDispatchCallback(...args) {
+          try { before(...args); } catch { /* recording must not change the request */ }
+          return orig.apply(this, args);
+        };
+      };
+      wrap("onHeaders", (statusCode, rawHeaders) => {
+        const headers = {};
+        const ct = headerGet(rawHeaders, "content-type");
+        const cl = headerGet(rawHeaders, "content-length");
+        if (ct != null) headers["content-type"] = String(ct);
+        if (cl != null) headers["content-length"] = String(cl);
+        recordHttpResponse(record, statusCode, headers, startedMs);
+      });
+      wrap("onUpgrade", (statusCode, rawHeaders) => {
+        recordHttpResponse(record, statusCode, {}, startedMs);
+      });
+      wrap("onComplete", () => {
+        record.duration_ms = Math.max(0, Date.now() - startedMs);
+      });
+      wrap("onError", (err) => {
+        recordHttpError(record, err, startedMs);
+      });
+    } catch {
+      /* fail open: the request still goes out unchanged */
+    }
+    return handler;
   }
 
   function wrapDispatchCall(dispatcher, orig, opts, handler) {
