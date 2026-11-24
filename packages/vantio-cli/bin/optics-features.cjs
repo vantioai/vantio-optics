@@ -898,11 +898,18 @@ function buildCoverage(input) {
   };
 }
 
+// Text from a record goes to a terminal with its control characters replaced,
+// so a field can't move the cursor, retitle the window or start a new line
+// (VAN-403). JSON output escapes them itself.
+function termText(value) {
+  return String(value ?? "").replace(/[\u0000-\u001f\u007f-\u009f]/g, "?");
+}
+
 function formatPathRow(row) {
-  const programs = row.programs.length ? row.programs.join(", ") : "unknown";
-  const bytes = row.bytes == null ? "size not recorded" : `${row.bytes} bytes`;
-  const time = row.first_time || "time not recorded";
-  return `  ${row.destination}\n    program ${programs}  calls ${row.calls}  ${bytes}  first ${time}`;
+  const programs = row.programs.length ? row.programs.map(termText).join(", ") : "unknown";
+  const bytes = row.bytes == null ? "size not recorded" : `${termText(row.bytes)} bytes`;
+  const time = row.first_time ? termText(row.first_time) : "time not recorded";
+  return `  ${termText(row.destination)}\n    program ${programs}  calls ${termText(row.calls)}  ${bytes}  first ${time}`;
 }
 
 function formatCoverageText(coverage) {
@@ -910,9 +917,9 @@ function formatCoverageText(coverage) {
     "Vantio Optics | Coverage map",
     "Prompts and completions are never stored.",
     "",
-    `System: ${coverage.system.hostname} (${coverage.system.platform || "unknown"})`,
+    `System: ${termText(coverage.system.hostname)} (${termText(coverage.system.platform || "unknown")})`,
   ];
-  if (coverage.system.machine_id) lines.push(`Machine id: ${coverage.system.machine_id}`);
+  if (coverage.system.machine_id) lines.push(`Machine id: ${termText(coverage.system.machine_id)}`);
   lines.push("Scope: this system. Processes that never entered the wrap are named below and are not listed as covered.");
   lines.push("");
   if (coverage.systems.length === 0) {
@@ -927,7 +934,7 @@ function formatCoverageText(coverage) {
   }
   for (const system of coverage.systems) {
     if (coverage.systems.length > 1 || system.hostname !== coverage.system.hostname) {
-      lines.push(`Recorded system: ${system.hostname}`);
+      lines.push(`Recorded system: ${termText(system.hostname)}`);
     }
     lines.push("Under authority");
     if (system.under_authority.length === 0) lines.push("  None.");
@@ -946,10 +953,11 @@ function formatCoverageText(coverage) {
     lines.push("Processes");
     if (system.processes.length === 0) lines.push("  None recorded.");
     for (const processRow of system.processes) {
-      const parent = processRow.parent_program ? `, from ${processRow.parent_program}` : "";
-      const pid = processRow.pid == null ? "pid not recorded" : `pid ${processRow.pid}`;
+      const parent = processRow.parent_program ? `, from ${termText(processRow.parent_program)}` : "";
+      const pid = processRow.pid == null ? "pid not recorded" : `pid ${termText(processRow.pid)}`;
       const covered = processRow.covered === false ? "  not covered" : "";
-      lines.push(`  ${processRow.program}${parent}  ${pid}  ${processRow.started_at || "time not recorded"}${covered}`);
+      const started = processRow.started_at ? termText(processRow.started_at) : "time not recorded";
+      lines.push(`  ${termText(processRow.program)}${parent}  ${pid}  ${started}${covered}`);
     }
     lines.push("");
   }
@@ -1030,16 +1038,16 @@ function formatDestinationText(alerts) {
   ];
   for (const alert of alerts) {
     lines.push("Flag");
-    lines.push(`  ${alert.flag_label}`);
+    lines.push(`  ${termText(alert.flag_label)}`);
     lines.push("Destination");
-    lines.push(`  ${alert.destination}`);
+    lines.push(`  ${termText(alert.destination)}`);
     lines.push("Program");
-    lines.push(`  ${alert.program}`);
+    lines.push(`  ${termText(alert.program)}`);
     lines.push("First connection");
-    lines.push(`  ${alert.first_connection || "time not recorded"}`);
+    lines.push(`  ${alert.first_connection ? termText(alert.first_connection) : "time not recorded"}`);
     if (alert.trace_id) {
       lines.push("Trace id");
-      lines.push(`  ${alert.trace_id}`);
+      lines.push(`  ${termText(alert.trace_id)}`);
     }
     lines.push("");
   }
@@ -1936,9 +1944,9 @@ function localClock(value) {
 function formatLiveAlert(event) {
   return [
     "New destination",
-    `  First connection: ${event.clock || "time not recorded"}`,
-    `  Destination: ${event.destination}`,
-    `  Program: ${event.program}`,
+    `  First connection: ${event.clock ? termText(event.clock) : "time not recorded"}`,
+    `  Destination: ${termText(event.destination)}`,
+    `  Program: ${termText(event.program)}`,
     "",
   ].join("\n");
 }
