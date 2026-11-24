@@ -4,6 +4,7 @@
 
 const { existsSync, readdirSync, readFileSync, readlinkSync } = require("node:fs");
 const { join, basename } = require("node:path");
+const { isatty } = require("node:tty");
 
 const INTERPRETERS = new Set(["node", "nodejs", "python", "python3", "bun", "deno"]);
 const NAMED_AI = new Set(["ollama", "llama-server"]);
@@ -245,7 +246,10 @@ function signalFromTerminal(options) {
       return false;
     }
   }
-  return Boolean(process.stdin.isTTY || process.stdout.isTTY || process.stderr.isTTY);
+  // isatty() on the descriptors, so no stdin stream is created in the wrapper.
+  return [0, 1, 2].some((fd) => {
+    try { return isatty(fd); } catch { return false; }
+  });
 }
 
 function readProcList(procRoot) {

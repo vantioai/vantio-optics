@@ -106,3 +106,52 @@ Run on the working tree of this commit:
 - A terminal hangup can reach the program twice when the session has already lost its terminal by the time the wrapper reads `/proc`.
 - Not tested on macOS. Windows is unchanged.
 - Ships only at the next CLI release, with Zach's go.
+
+## Second follow-up commit (Nov 24 review)
+
+Base: vantio-optics `a1a7568`, vantio-open-core `1a45b60`.
+
+Off Linux, `signalFromTerminal()` read `process.stdin.isTTY`. That creates a stdin stream object inside the wrapper the first time it runs. It now calls `tty.isatty()` on descriptors 0, 1 and 2, which reads the same thing and creates nothing. Linux is unchanged (it reads `/proc/self/stat`). No test change: this path runs only off Linux, and this run was on Linux.
+
+Run on the working tree of this commit:
+
+**vantio-optics**
+
+| Command | rc | Result |
+| --- | --- | --- |
+| `corepack pnpm install --frozen-lockfile` | 0 |  |
+| `pnpm --filter @vantio/cli run lint` | 0 |  |
+| `pnpm --filter @vantio/optics-mcp run lint` | 0 |  |
+| `pnpm --filter @vantio/agent-sdk run typecheck` | 0 |  |
+| `pnpm --filter @vantio/agent-sdk run typecheck:test` | 0 |  |
+| `pnpm --filter @vantio/cli run test` | 0 | 189 pass, 0 fail |
+| `pnpm --filter @vantio/optics-mcp run test` | 0 | 8 pass, 0 fail |
+| `pnpm --filter @vantio/agent-sdk run test` | 0 | 42 pass, 0 fail |
+| `pnpm --filter @vantio/agent-sdk run build` | 0 |  |
+| `node --test test/*.test.js` | 0 | 5 pass, 0 fail |
+| `node scripts/check_llms_full.mjs` | absent |  |
+| Python 3.10 `-m unittest discover -s packages/vantio-agent-sdk-py/tests -t packages/vantio-agent-sdk-py` | 0 | 128 run, OK (skipped=2) |
+| Python 3.11, same suite | 0 | 128 run, OK (skipped=2) |
+| Python 3.12, same suite | 0 | 128 run, OK (skipped=2) |
+| secret scan (`git grep` patterns from the repo rules) | 0 |  |
+| `llms-full.txt` against the manual pages | 0 |  |
+| `python3 scripts/check_open_core_drift.py <open-core mirror worktree>` | 1 | (only `packages/vantio-optics-mcp/src/server.js`, the known VAN-310 drift) |
+
+**vantio-open-core mirror**
+
+| Command | rc | Result |
+| --- | --- | --- |
+| `corepack pnpm install --frozen-lockfile` | 0 |  |
+| `pnpm --filter @vantio/cli run lint` | 0 |  |
+| `pnpm --filter @vantio/cli run test` | 0 | 189 pass, 0 fail |
+| `pnpm --filter @vantio/optics-mcp run lint` | 0 |  |
+| `pnpm --filter @vantio/optics-mcp test` | 0 | 5 pass, 0 fail |
+| Python 3.10 `-m unittest discover -s tests -t .` (in `packages/vantio-agent-sdk-py`) | 1 | 128 run, FAILED (failures=1, skipped=2) (fails: `test_wheel_and_sdist_runtime_sources_match`) |
+| Python 3.11, same suite | 1 | 128 run, FAILED (failures=1, skipped=2) (fails: `test_wheel_and_sdist_runtime_sources_match`) |
+| Python 3.12, same suite | 1 | 128 run, FAILED (failures=1, skipped=2) (fails: `test_wheel_and_sdist_runtime_sources_match`) |
+| `node scripts/release/ws11/verify.mjs --emit` | 0 |  |
+| `git status --porcelain` the same before and after `--emit` | 0 |  |
+
+### Gaps
+
+- The non-Linux path is not tested (no macOS here).
