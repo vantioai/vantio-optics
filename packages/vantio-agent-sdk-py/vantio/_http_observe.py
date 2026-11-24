@@ -126,6 +126,10 @@ _orig_asyncio_shell: Any = None
 _calls: list[dict[str, Any]] = []
 _started_ms = 0.0
 _trace_id = ""
+# One session per trace id passed to install(). Concurrent shield() calls each
+# keep their own calls and write their own run log (VAN-387).
+_sessions: dict[str, dict[str, Any]] = {}
+_active_trace: ContextVar[Optional[str]] = ContextVar("vantio_active_trace", default=None)
 # Host lists stay empty. Optics does not load a cloud policy.
 _policy: dict[str, Any] = {
     "allowed_hosts": [],
@@ -161,8 +165,13 @@ def _http_orig(fn: Any, *args: Any, **kwargs: Any) -> Any:
 
 
 async def _http_orig_async(fn: Any, *args: Any, **kwargs: Any) -> Any:
-    with _http_handled():
+    # Only the task's own context is marked. The thread-local depth would stay
+    # raised across the await and hide other tasks' calls (VAN-387).
+    token = _http_owns_connect.set(True)
+    try:
         return await fn(*args, **kwargs)
+    finally:
+        _http_owns_connect.reset(token)
 
 
 def _extra_hosts() -> set[str]:
@@ -337,10 +346,25 @@ def _host_port_from_url(url: Any) -> tuple[str, Optional[str], str]:
         return "", None, "/"
 
 
+def _session_for_call() -> Optional[dict[str, Any]]:
+    """The session a new call belongs to: the caller's shield(), else the first one."""
+    trace = _active_trace.get()
+    if trace is not None and trace in _sessions:
+        return _sessions[trace]
+    if _trace_id in _sessions:
+        return _sessions[_trace_id]
+    if _sessions:
+        return next(reversed(_sessions.values()))
+    return None
+
+
 def _append(rec: dict[str, Any]) -> None:
     with _lock:
         _calls.append(rec)
-    _note_live(rec)
+        session = _session_for_call()
+        if session is not None:
+            session["calls"].append(rec)
+    _note_live(rec, session["trace_id"] if session is not None else None)
 
 
 def _clock_local(moment: datetime) -> str:
@@ -384,7 +408,7 @@ def _allowlist_suppresses(destination: str, allowlist: dict[str, Any]) -> bool:
     return False
 
 
-def _note_live(rec: dict[str, Any]) -> None:
+def _note_live(rec: dict[str, Any], trace_id: Optional[str] = None) -> None:
     """Record the destination while the call is happening. Does not stop the call."""
     try:
         host = str(rec.get("hostname") or "").strip().lower()
@@ -431,7 +455,7 @@ def _note_live(rec: dict[str, Any]) -> None:
                     "destination": host,
                     "display": host,
                     "first_ts": rec.get("ts"),
-                    "trace_id": _trace_id or None,
+                    "trace_id": trace_id or _trace_id or None,
                     "alerted": fresh,
                 })
                 temporary = seen_path + ".tmp"
@@ -449,7 +473,7 @@ def _note_live(rec: dict[str, Any]) -> None:
                 "time": rec.get("ts"),
                 "program": program,
                 "destination": host,
-                "trace_id": _trace_id or None,
+                "trace_id": trace_id or _trace_id or None,
                 "method": rec.get("method"),
                 "path": str(rec.get("path") or "").split("?", 1)[0] or None,
                 "bytes": rec.get("bytes") if isinstance(rec.get("bytes"), int) else rec.get("bytes_observed"),
@@ -2117,19 +2141,158 @@ def _program_label(argv: Optional[list[str]] = None) -> str:
     return "python"
 
 
-def _write_run_log() -> None:
-    if not _calls or not _trace_id:
+_RUN_LOG_LOCK_WAIT_S = 2.0
+_RUN_LOG_LOCK_STALE_S = 10.0
+_RUN_LOG_MAX_BYTES = 512 * 1024 * 1024
+
+
+@contextmanager
+def _run_log_lock(path: str) -> Iterator[None]:
+    """Hold <path>.lock, the same lock the Node interceptor takes.
+
+    After the wait it goes on without the lock: writing the run log must never
+    hold up the program's exit for long.
+    """
+    lock = path + ".lock"
+    deadline = time.monotonic() + _RUN_LOG_LOCK_WAIT_S
+    fd: Optional[int] = None
+    while True:
+        try:
+            fd = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            break
+        except FileExistsError:
+            try:
+                if time.time() - os.stat(lock).st_mtime > _RUN_LOG_LOCK_STALE_S:
+                    os.unlink(lock)
+                    continue
+            except OSError:
+                continue
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.01)
+        except OSError:
+            break
+    try:
+        yield
+    finally:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            try:
+                os.unlink(lock)
+            except OSError:
+                pass
+
+
+def _read_existing_run_log(path: str, trace_id: str, run_id: Optional[str]) -> Optional[dict[str, Any]]:
+    """The run log already at path, only when it is a regular file of this run."""
+    if not run_id:
+        return None
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError:
+        return None
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > _RUN_LOG_MAX_BYTES:
+            return None
+        chunks = []
+        while True:
+            chunk = os.read(fd, 1 << 20)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        data = json.loads(b"".join(chunks).decode("utf-8"))
+    except (OSError, ValueError):
+        return None
+    finally:
+        os.close(fd)
+    if not isinstance(data, dict) or data.get("vantio_run_log") != "1":
+        return None
+    if data.get("trace_id") != trace_id or data.get("run_id") != run_id or not isinstance(data.get("calls"), list):
+        return None
+    return data
+
+
+def _merged_summary(existing: dict[str, Any], mine: dict[str, Any], calls: list[Any]) -> dict[str, Any]:
+    valid = [c for c in calls if isinstance(c, dict)]
+    summary = dict(existing.get("summary") if isinstance(existing.get("summary"), dict) else {})
+    summary.update(mine)
+    optics_status, application_status = _rollup_status(valid)
+    summary.update({
+        "total_calls": len(valid),
+        "hosts": sorted({str(c.get("hostname") or "unknown") for c in valid}),
+        "opticsStatus": optics_status,
+        "applicationStatus": application_status,
+        "opticsLabel": _human_status(optics_status),
+        **summarize_customer_fields(valid, application_status),
+    })
+    # Fields the Node interceptor writes, kept true for the merged calls.
+    if "total_bytes" in summary:
+        summary["total_bytes"] = sum(c["bytes"] for c in valid if isinstance(c.get("bytes"), (int, float)))
+    if "errors" in summary:
+        summary["errors"] = sum(1 for c in valid if c.get("error") or c.get("ok") is False)
+    if "providers" in summary:
+        summary["providers"] = sorted({str(c["provider"]) for c in valid if c.get("provider")})
+    if "by_host" in summary or "by_provider" in summary:
+        by_host: dict[str, dict[str, int]] = {}
+        by_provider: dict[str, dict[str, int]] = {}
+        for c in valid:
+            size = c["bytes"] if isinstance(c.get("bytes"), (int, float)) else 0
+            failed = bool(c.get("error") or c.get("ok") is False)
+            row = by_host.setdefault(str(c.get("hostname") or "unknown"), {"calls": 0, "bytes": 0, "errors": 0})
+            row["calls"] += 1
+            row["bytes"] += size
+            row["errors"] += 1 if failed else 0
+            prow = by_provider.setdefault(str(c.get("provider") or "unknown"), {"calls": 0, "bytes": 0})
+            prow["calls"] += 1
+            prow["bytes"] += size
+        summary["by_host"] = by_host
+        summary["by_provider"] = by_provider
+    return summary
+
+
+def _merge_run_log(existing: Optional[dict[str, Any]], mine: dict[str, Any]) -> dict[str, Any]:
+    """Add this process's calls to the log another process of the run wrote.
+
+    The process that started first keeps the run identity.
+    """
+    if existing is None:
+        return mine
+    first = existing if str(existing.get("started_at") or "~") <= str(mine.get("started_at") or "~") else mine
+    calls = list(existing["calls"]) + list(mine["calls"])
+    merged = dict(existing)
+    merged.update(mine)
+    for key in ("program", "system_hostname", "pid", "ppid", "runtime", "started_at", "node_version", "platform", "arch", "cli_version"):
+        if key in first:
+            merged[key] = first[key]
+    merged["calls"] = calls
+    merged["summary"] = _merged_summary(existing, mine["summary"], calls)
+    mediations = {m for m in str(existing.get("mediation") or "").split(",") if m} | {m for m in str(mine.get("mediation") or "").split(",") if m}
+    merged["mediation"] = ",".join(sorted(mediations))
+    return merged
+
+
+def _write_run_log(trace_id: Optional[str] = None, calls: Optional[list[dict[str, Any]]] = None, started: Optional[float] = None) -> None:
+    trace_id = trace_id if trace_id is not None else _trace_id
+    calls = list(calls if calls is not None else _calls)
+    started = started if started is not None else _started_ms
+    if not calls or not trace_id:
         return
     try:
         home = os.environ.get("VANTIO_HOME") or os.path.join(os.path.expanduser("~"), ".vantio")
         runs = os.path.join(home, "runs")
         os.makedirs(runs, mode=0o700, exist_ok=True)
         now = datetime.now(timezone.utc)
-        hosts = sorted({c.get("hostname") or "unknown" for c in _calls})
-        mediations = sorted({c.get("mediation") or "python_urllib" for c in _calls})
-        optics_status, application_status = _rollup_status(_calls)
-        customer = summarize_customer_fields(_calls, application_status)
-        payload = {
+        hosts = sorted({c.get("hostname") or "unknown" for c in calls})
+        mediations = sorted({c.get("mediation") or "python_urllib" for c in calls})
+        optics_status, application_status = _rollup_status(calls)
+        customer = summarize_customer_fields(calls, application_status)
+        run_id = (os.environ.get("VANTIO_RUN_ID") or "")[:128] or None
+        payload: dict[str, Any] = {
             "vantio_run_log": "1",
             "schema_version": 2,
             "schema_status": SCHEMA_STATUS,
@@ -2142,16 +2305,17 @@ def _write_run_log() -> None:
                 "applicationOutcomeLabel": "Observed outcome",
                 "providerResponse": "Provider response",
             },
-            "trace_id": _trace_id,
+            "trace_id": trace_id,
+            **({"run_id": run_id} if run_id else {}),
             "program": _program_label(),
             "system_hostname": socket.gethostname(),
             "runtime": "python",
             "mediation": ",".join(mediations),
-            "started_at": datetime.fromtimestamp(_started_ms, timezone.utc).isoformat() if _started_ms else now.isoformat(),
+            "started_at": datetime.fromtimestamp(started, timezone.utc).isoformat() if started else now.isoformat(),
             "generated_at": now.isoformat(),
-            "calls": list(_calls),
+            "calls": calls,
             "summary": {
-                "total_calls": len(_calls),
+                "total_calls": len(calls),
                 "hosts": hosts,
                 "opticsStatus": optics_status,
                 "applicationStatus": application_status,
@@ -2162,25 +2326,44 @@ def _write_run_log() -> None:
                 "note": "Python wrap observes urllib (urlopen and custom openers), requests/httpx/aiohttp/urllib3/pycurl when installed, http.client, socket.connect / connect_ex / create_connection, and subprocess curl/wget/httpie/aria2c to in-scope LLM hosts. File-body size is counted from stat; contents are not read. Argv is not rewritten. Optics does not block, delay, or rewrite. Browsers stay outside this wrap.",
             },
         }
-        safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in _trace_id)[:80]
+        safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in trace_id)[:80]
         path = os.path.join(runs, f"{safe}.json")
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(payload, fh, indent=2)
-            fh.write("\n")
-        try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
+        with _run_log_lock(path):
+            merged = _merge_run_log(_read_existing_run_log(path, trace_id, run_id), payload)
+            tmp = f"{path}.{os.getpid()}.tmp"
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0), 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(merged, fh, indent=2)
+                fh.write("\n")
+            os.replace(tmp, path)
     except Exception:
         return
 
 
-def install(trace_id: str) -> None:
+class _InstallToken:
+    """What install() hands back so uninstall() ends the same session."""
+
+    __slots__ = ("trace_id", "context_token")
+
+    def __init__(self, trace_id: str, context_token: Any) -> None:
+        self.trace_id = trace_id
+        self.context_token = context_token
+
+
+def install(trace_id: str) -> _InstallToken:
+    """Start observing. Returns a token for uninstall().
+
+    A call made while another session is active in this context (a nested
+    shield(), or a shield() under `vantio run python`) joins that session, as
+    before. A call with no active session, such as each task of
+    asyncio.gather(shield("a"), shield("b")), starts its own session and run log.
+    """
     global _depth, _started_ms, _trace_id
     with _lock:
         _depth += 1
         if _depth == 1:
             _calls.clear()
+            _sessions.clear()
             _started_ms = time.time()
             _trace_id = trace_id
             _load_policy()
@@ -2194,15 +2377,48 @@ def install(trace_id: str) -> None:
             _install_urllib3()
             _install_pycurl()
             _install_curl_spawn()
+        parent = _active_trace.get()
+        key = parent if parent is not None and parent in _sessions else trace_id
+        session = _sessions.get(key)
+        if session is None:
+            session = {"trace_id": key, "calls": [], "started": time.time(), "refs": 0}
+            _sessions[key] = session
+        session["refs"] += 1
+    return _InstallToken(key, _active_trace.set(key))
 
 
-def uninstall() -> None:
+def uninstall(token: Optional[_InstallToken] = None) -> None:
+    """End the session install() returned token for.
+
+    Without a token it ends the first session (the process-lifetime wrap).
+    """
     global _depth
+    finished: Optional[dict[str, Any]] = None
     with _lock:
         if _depth <= 0:
             return
+        key: Optional[str] = None
+        if isinstance(token, _InstallToken):
+            key = token.trace_id
+            try:
+                _active_trace.reset(token.context_token)
+            except (ValueError, RuntimeError):
+                pass
+        if key is None or key not in _sessions:
+            key = _trace_id if _trace_id in _sessions else next(iter(_sessions), None)
+        session = _sessions.get(key) if key is not None else None
+        if session is not None:
+            session["refs"] -= 1
+            if session["refs"] <= 0:
+                finished = _sessions.pop(key)
         _depth -= 1
-        if _depth == 0:
+        last = _depth == 0
+    if finished is not None:
+        _write_run_log(finished["trace_id"], finished["calls"], finished["started"])
+    if last:
+        with _lock:
+            if _depth != 0:
+                return
             urllib.request.urlopen = _orig_urlopen  # type: ignore[assignment]
             _uninstall_opener()
             _uninstall_requests()
@@ -2213,5 +2429,4 @@ def uninstall() -> None:
             _uninstall_pycurl()
             _uninstall_http_client()
             _uninstall_curl_spawn()
-            _write_run_log()
             _reset_policy()
