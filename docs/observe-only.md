@@ -43,7 +43,7 @@ If it can **change or block** behavior in production, it is **not** Free:
 
 **Fence:** if it can say **no** in production → **Vantio Phantom Engine**.
 
-Phantom Engine Enforce workflow: **Rules that stick** — author policy, dry-run, enforce, ledger. Applies where the agent is wired; does not close raw sockets or SDK omission on its own.
+Phantom Engine Enforce workflow: **Rules that stick** — author policy, dry-run, enforce, ledger. It is designed to apply where the agent is wired, and it does not close raw sockets or SDK omission on its own. Its live enforcement is not yet proven.
 
 > **Note on Gate:** Gate is the internal name for the Enforce function set inside Phantom Engine. The
 > `@vantio/gate-mcp` package provides a legacy/compat dry-run evaluation tool. Gate is not a

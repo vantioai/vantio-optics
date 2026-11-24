@@ -4,7 +4,7 @@ Manual version 1. Product name: **Vantio Optics**.
 
 Optics is free, local-first observability for supported AI traffic. It records that a wrapped process called a destination, when, and how large the exchange was. Prompts and completions are absent from the record.
 
-Optics observes. Phantom Engine is the separate product that enforces. This manual stops at Optics.
+Optics observes. Phantom Engine is the separate product built to enforce; its live enforcement is not yet proven. This manual stops at Optics.
 
 The installable versions on 2026-11-19 are `@vantio/cli@0.3.27` and `vantio-agent-sdk==3.1.2`, the same as this source tree. See [VERSION-METADATA.json](VERSION-METADATA.json).
 

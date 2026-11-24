@@ -2,7 +2,7 @@
 
 **Vantio** is the infrastructure control layer for autonomous AI. This package is **Vantio Optics** Observe for Node: a trace ID around your agent. It does not wrap `fetch` by itself — Node wrap lives in [`@vantio/cli`](https://www.npmjs.com/package/@vantio/cli) (`vantio run`).
 
-Optics does not block on its own. [Phantom Engine](https://github.com/vantioai/vantio-phantom-engine) enforces rules on the wrapped path and provides runtime protection on enrolled Linux — Observe, Enforce, and Control in one purchase.
+Optics does not block on its own. [Phantom Engine](https://github.com/vantioai/vantio-phantom-engine) is the Vantio product built to enforce rules on the wrapped path and add runtime protection on enrolled Linux. Its live enforcement is not yet proven. Observe, Enforce, and Control come in one purchase.
 
 ```bash
 npm install @vantio/agent-sdk@0.2.4
@@ -69,7 +69,7 @@ Requires `VANTIO_CLOUD_INGEST=true` and `VANTIO_API_KEY` to be set. Non-fatal �
 
 ## Policy & redaction (Vantio Phantom Engine)
 
-Enforcement policy is served by the Phantom Engine control plane; the SDK applies it **locally** — Vantio is not a network proxy. The SDK ships two building blocks so you can fetch and enforce that policy yourself.
+Policy for Phantom Engine is designed to come from its control plane. The SDK does not enforce that policy for you, and Vantio is not a network proxy. It ships two building blocks: one fetches the policy, and one redacts PII inside your process. What your code does with them is up to your code. Phantom Engine's live enforcement is not yet proven.
 
 ### `fetchPolicy(apiKey, opts?)` — load the cloud-managed policy
 
