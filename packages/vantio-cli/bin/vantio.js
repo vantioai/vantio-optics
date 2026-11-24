@@ -474,8 +474,15 @@ function logoutCommand() {
 // ── shared formatting helpers ─────────────────────────────────────────────────────────────────────────
 
 // Pad a string to a fixed width, truncating with '…' if needed.
+// Text from a run file goes to a terminal with its control characters
+// replaced, so a field can't move the cursor, retitle the window or start a
+// new line (VAN-403).
+function term(value) {
+  return String(value ?? "").replace(/[\u0000-\u001f\u007f-\u009f]/g, "?");
+}
+
 function col(str, width) {
-  const s = String(str ?? "");
+  const s = term(str);
   if (s.length > width) return s.slice(0, width - 1) + "…";
   return s.padEnd(width);
 }
@@ -790,7 +797,7 @@ function findRunByPrefix(dir, prefix, cmd = "prove") {
   if (matches.length === 0) return { path: null, empty: true };
   if (matches.length > 1) {
     process.stderr.write(`vantio ${cmd}: '${prefix}' matches ${matches.length} runs. Use a longer prefix:\n`);
-    for (const f of matches) process.stderr.write(`  ${f.replace(/\.json$/, "")}\n`);
+    for (const f of matches) process.stderr.write(`  ${term(f.replace(/\.json$/, ""))}\n`);
     process.exit(1);
   }
   return { path: join(dir, matches[0]), empty: false };
@@ -885,7 +892,7 @@ async function proveCommand(args) {
       );
       return;
     }
-    process.stderr.write(`[ ∅ VANTIO ] Using most recent run log: ~/.vantio/runs/${logPath.split(/[\\/]/).pop()}\n`);
+    process.stderr.write(`[ ∅ VANTIO ] Using most recent run log: ~/.vantio/runs/${term(logPath.split(/[\\/]/).pop())}\n`);
   }
 
   const loaded = readJsonFile(logPath);
@@ -929,7 +936,8 @@ async function proveCommand(args) {
     const safeid = (log.trace_id || "unknown").replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 40);
     writeProof(`vantio-proof-${safeid}.html`);
   } else {
-    process.stdout.write(report);
+    // JSON escapes control characters itself. Markdown keeps only its own line breaks and tabs.
+    process.stdout.write(values.json ? report : report.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "?"));
   }
 }
 
@@ -1128,7 +1136,7 @@ function formatCallLine(call, traceId) {
   const route = [method, path].filter(Boolean).join(" ") || "—";
   const bytes = view.bytes != null ? Number(view.bytes).toLocaleString() : "—";
   const ts = view.ts || "—";
-  const tid = traceId ? String(traceId) : "—";
+  const tid = traceId ? term(traceId) : "—";
   return `${col(ts, CALL_COLS.ts)}  ${col(host, CALL_COLS.host)}  ${col(view.opticsLabel, CALL_COLS.optics)}  ` +
     `${col(view.applicationLabel, CALL_COLS.outcome)}  ${col(route, CALL_COLS.route)}  ${col(bytes, CALL_COLS.bytes)}  ${tid}`;
 }
@@ -1261,16 +1269,16 @@ function printTailCalls(log, lines, asJson, showAll) {
     return shown.length;
   }
   process.stdout.write(
-    `\nTail — trace ${log.trace_id || "—"} · showing ${slice.length} of ${calls.length} call(s)\n\n`
+    `\nTail — trace ${term(log.trace_id || "—")} · showing ${slice.length} of ${calls.length} call(s)\n\n`
   );
   if (slice.length === 0) {
     if (calls.length === 0) process.stdout.write("No calls recorded in this run log.\n");
-    process.stdout.write(`Next: vantio prove --run=${log.trace_id || ""}\n`);
+    process.stdout.write(`Next: vantio prove --run=${term(log.trace_id || "")}\n`);
     return 0;
   }
   printCallHeader();
   for (const c of slice) process.stdout.write(formatCallLine(c, log.trace_id) + "\n");
-  process.stdout.write(`\nNext: vantio prove --run=${log.trace_id || ""}\n`);
+  process.stdout.write(`\nNext: vantio prove --run=${term(log.trace_id || "")}\n`);
   return slice.length;
 }
 
@@ -1320,7 +1328,7 @@ async function tailCommand(args) {
     logPath = found.path;
     log = loadRunLog(logPath, "tail");
     if (!values.run) {
-      process.stderr.write(`[ ∅ VANTIO ] Tailing most recent run: ${log.trace_id || "local run"}\n`);
+      process.stderr.write(`[ ∅ VANTIO ] Tailing most recent run: ${term(log.trace_id || "local run")}\n`);
     }
     printTailCalls(log, n, values.json, values.all);
   }
@@ -1470,25 +1478,25 @@ async function diffCommand(args) {
   }
 
   process.stdout.write("\nRun diff (Optics · observe only)\n\n");
-  process.stdout.write(`  A  ${a.trace_id || "—"}  ·  ${a.total_calls} call(s)  ·  ${(a.total_bytes || 0).toLocaleString()} bytes\n`);
-  process.stdout.write(`  B  ${b.trace_id || "—"}  ·  ${b.total_calls} call(s)  ·  ${(b.total_bytes || 0).toLocaleString()} bytes\n`);
+  process.stdout.write(`  A  ${term(a.trace_id || "—")}  ·  ${term(a.total_calls)} call(s)  ·  ${(a.total_bytes || 0).toLocaleString()} bytes\n`);
+  process.stdout.write(`  B  ${term(b.trace_id || "—")}  ·  ${term(b.total_calls)} call(s)  ·  ${(b.total_bytes || 0).toLocaleString()} bytes\n`);
   process.stdout.write(`  Δ  calls ${result.delta_calls >= 0 ? "+" : ""}${result.delta_calls}  ·  bytes ${result.delta_bytes >= 0 ? "+" : ""}${result.delta_bytes.toLocaleString()}\n\n`);
 
   if (added.length) {
     process.stdout.write(`Hosts only in B (${added.length}):\n`);
-    for (const h of added) process.stdout.write(`  + ${h}  (${b.hosts[h].calls} call(s))\n`);
+    for (const h of added) process.stdout.write(`  + ${term(h)}  (${b.hosts[h].calls} call(s))\n`);
     process.stdout.write("\n");
   }
   if (removed.length) {
     process.stdout.write(`Hosts only in A (${removed.length}):\n`);
-    for (const h of removed) process.stdout.write(`  - ${h}  (${a.hosts[h].calls} call(s))\n`);
+    for (const h of removed) process.stdout.write(`  - ${term(h)}  (${a.hosts[h].calls} call(s))\n`);
     process.stdout.write("\n");
   }
   if (changed.length) {
     process.stdout.write(`Hosts changed (${changed.length}):\n`);
     for (const row of changed) {
       process.stdout.write(
-        `  ~ ${row.host}  calls ${row.calls_a}→${row.calls_b} (${row.delta_calls >= 0 ? "+" : ""}${row.delta_calls})` +
+        `  ~ ${term(row.host)}  calls ${row.calls_a}→${row.calls_b} (${row.delta_calls >= 0 ? "+" : ""}${row.delta_calls})` +
         `  bytes ${row.bytes_a.toLocaleString()}→${row.bytes_b.toLocaleString()}\n`
       );
     }
