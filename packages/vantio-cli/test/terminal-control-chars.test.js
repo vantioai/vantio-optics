@@ -6,9 +6,11 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { createRequire } from "node:module";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CLI_PATH = join(__dirname, "..", "bin", "vantio.js");
+const features = createRequire(import.meta.url)("../bin/optics-features.cjs");
 // Any C0 or C1 control character other than the CLI's own newline.
 const CONTROL = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/;
 
@@ -34,6 +36,7 @@ function fixture(hostile) {
   writeFileSync(join(dir, "0xfirst.json"), JSON.stringify({
     vantio_run_log: "1",
     trace_id: trace,
+    program: hostile ? "agent\u001b[1m.js" : "agent.js",
     generated_at: "2026-11-24T00:00:01.000Z",
     summary: { total_calls: 1 },
     calls: [{
@@ -59,6 +62,8 @@ const COMMANDS = [
   ["prove", "--list"],
   ["diff", "0xfirst", "0xsecond"],
   ["prove", "--run=0xfirst", "--format=md"],
+  ["coverage"],
+  ["destinations", "--dry-run"],
 ];
 
 test("hostile run fields print with control characters replaced", async () => {
@@ -86,7 +91,26 @@ test("ordinary values print unchanged", async () => {
     assert.match(tail.stdout, /0xplainrun/);
     const diff = await runCli(["diff", "0xfirst", "0xsecond"], home);
     assert.match(diff.stdout, /- api\.openai\.com {2}\(1 call\(s\)\)/);
+    const coverage = await runCli(["coverage"], home);
+    assert.equal(coverage.code, 0, coverage.stderr);
+    assert.match(coverage.stdout, /^ {2}api\.openai\.com$/m);
+    assert.match(coverage.stdout, /program agent\.js {2}calls 1/);
+    const destinations = await runCli(["destinations", "--dry-run"], home);
+    assert.equal(destinations.code, 0, destinations.stderr);
+    assert.match(destinations.stdout, /Destination\n {2}api\.openai\.com\nProgram\n {2}agent\.js\n/);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+test("a live New destination line has control characters replaced", () => {
+  const hostile = features.formatLiveAlert({
+    clock: "12:00:00\u001b[2J",
+    destination: "api.openai.com\u001b]0;PWNED\u0007",
+    program: "agent\r\nFAKE LINE",
+  });
+  assert.doesNotMatch(hostile, CONTROL);
+  assert.doesNotMatch(hostile, /^FAKE LINE/m);
+  const plain = features.formatLiveAlert({ clock: "12:00:00", destination: "api.openai.com", program: "agent.js" });
+  assert.equal(plain, "New destination\n  First connection: 12:00:00\n  Destination: api.openai.com\n  Program: agent.js\n");
 });

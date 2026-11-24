@@ -37,3 +37,61 @@ Mutation check: with `vantio.js` back on `main`, the hostile-file test fails; th
 - CI did not run: the org billing lock.
 - `coverage`, `destinations` and `export` text output were not changed here; they already pass fields through `cleanToken`. Not re-tested for control characters.
 - Ships only at the next CLI release, with Zach's go.
+
+## Follow-up commit (Nov 24 review)
+
+Base: vantio-optics `bea979a`, vantio-open-core `04f662a` (the previous heads of this branch).
+
+**Finding.** The gap above was real. `cleanToken()` only refuses `\r` and `\n`, so ESC and other control bytes from a run file still reached the terminal in `vantio coverage`, `vantio destinations`, and the "New destination" line that `tail --follow` and `vantio run` print. Reproduced on `bea979a` with a run file whose hostname and program hold escape sequences: `coverage` printed 3 ESC bytes and `destinations --dry-run` printed 2.
+
+**Change.** `packages/vantio-cli/bin/optics-features.cjs`: a `termText()` helper, the same rule as `term()` in `vantio.js`, for every record field that `formatCoverageText()`, `formatDestinationText()` and `formatLiveAlert()` print. JSON output is unchanged.
+
+**Tests** (`terminal-control-chars.test.js`, now 3): `coverage` and `destinations --dry-run` join the hostile-file command list, the fixture gets a hostile `program`, `formatLiveAlert()` is checked with control characters and with plain values, and the plain-values test also checks the `coverage` and `destinations` lines.
+
+Mutation check: with `optics-features.cjs` back on `bea979a`, the hostile-file test and the live-line test fail; the plain-values test (negative case) passes on both.
+
+Run on the working tree of this commit:
+
+**vantio-optics**
+
+| Command | rc | Result |
+| --- | --- | --- |
+| `corepack pnpm install --frozen-lockfile` | 0 |  |
+| `pnpm --filter @vantio/cli run lint` | 0 |  |
+| `pnpm --filter @vantio/optics-mcp run lint` | 0 |  |
+| `pnpm --filter @vantio/agent-sdk run typecheck` | 0 |  |
+| `pnpm --filter @vantio/agent-sdk run typecheck:test` | 0 |  |
+| `pnpm --filter @vantio/cli run test` | 0 | 182 pass, 0 fail |
+| `pnpm --filter @vantio/optics-mcp run test` | 0 | 8 pass, 0 fail |
+| `pnpm --filter @vantio/agent-sdk run test` | 0 | 42 pass, 0 fail |
+| `pnpm --filter @vantio/agent-sdk run build` | 0 |  |
+| `node --test test/*.test.js` | 0 | 5 pass, 0 fail |
+| `node scripts/check_llms_full.mjs` | absent |  |
+| Python 3.10 `-m unittest discover -s packages/vantio-agent-sdk-py/tests -t packages/vantio-agent-sdk-py` | 0 | 128 run, OK (skipped=2) |
+| Python 3.11, same suite | 0 | 128 run, OK (skipped=2) |
+| Python 3.12, same suite | 0 | 128 run, OK (skipped=2) |
+| secret scan (`git grep` patterns from the repo rules) | 0 |  |
+| `llms-full.txt` against the manual pages | 0 |  |
+| `python3 scripts/check_open_core_drift.py <open-core mirror worktree>` | 1 | (only `packages/vantio-optics-mcp/src/server.js`, the known VAN-310 drift) |
+
+**vantio-open-core mirror**
+
+| Command | rc | Result |
+| --- | --- | --- |
+| `corepack pnpm install --frozen-lockfile` | 0 |  |
+| `pnpm --filter @vantio/cli run lint` | 0 |  |
+| `pnpm --filter @vantio/cli run test` | 0 | 182 pass, 0 fail |
+| `pnpm --filter @vantio/optics-mcp run lint` | 0 |  |
+| `pnpm --filter @vantio/optics-mcp test` | 0 | 5 pass, 0 fail |
+| Python 3.10 `-m unittest discover -s tests -t .` (in `packages/vantio-agent-sdk-py`) | 1 | 128 run, FAILED (failures=1, skipped=2) (fails: `test_wheel_and_sdist_runtime_sources_match`) |
+| Python 3.11, same suite | 1 | 128 run, FAILED (failures=1, skipped=2) (fails: `test_wheel_and_sdist_runtime_sources_match`) |
+| Python 3.12, same suite | 1 | 128 run, FAILED (failures=1, skipped=2) (fails: `test_wheel_and_sdist_runtime_sources_match`) |
+| `node scripts/release/ws11/verify.mjs --emit` | 0 |  |
+| `git status --porcelain` the same before and after `--emit` | 0 |  |
+
+### Gaps
+
+- CI did not run: the org billing lock (VAN-129).
+- `export` writes JSON lines and syslog, which escape control characters. Not changed.
+- Bidirectional-text characters (such as U+202E) are not control characters and are printed as they are.
+- Ships only at the next CLI release, with Zach's go.
