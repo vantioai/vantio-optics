@@ -12,7 +12,7 @@
 npm install -g @vantio/cli@0.3.27
 ```
 
-0.3.24 is the npm release checked on 2026-10-21. This directory's `package.json` is 0.3.26. There is no curl installer at `https://vantio.ai/install.sh`. [vantio.ai/install](https://vantio.ai/install) goes to the install docs. Python support requires `vantio-agent-sdk`. Follow the current Python SDK example and verify that a supported outbound event appears before relying on the coverage state.
+There is no curl installer at `https://vantio.ai/install.sh`. [vantio.ai/install](https://vantio.ai/install) goes to the install docs. Python support requires `vantio-agent-sdk`. Follow the current Python SDK example and verify that a supported outbound event appears before relying on the coverage state.
 
 ---
 
@@ -51,7 +51,7 @@ vantio run <program>  # spawn a program under the Vantio execution context
 vantio demo           # in-process demo of one observed call (no network)
 vantio status         # local install and data status (no network by default)
 vantio discover       # local wrap history on this machine
-vantio prove          # generate a proof artifact from a local run log
+vantio prove          # write an unsigned local report from a local run log
 vantio search [query] # search local run logs by host, path, action, or free text
 vantio tail           # show the latest calls from a captured run
 vantio diff <a> <b>   # compare two local runs — hosts, counts, bytes
@@ -94,7 +94,7 @@ vantio run --json node agent.js      # unstable JSON run record on stdout
 vantio run --mcp-enforce node agent.js
 ```
 
-`vantio run` loads in-process MCP awareness for Node, and the same library for Python child-process stdio. The default is observe, and injection and rug-pull stay on log. `--mcp-enforce` withholds inside that process. `VANTIO_MCP_AWARENESS=off` does not load it. The path does not add a proxy process. Payload text is not stored. This is not Phantom Engine. Host attachment remains a later step.
+`vantio run` loads in-process MCP awareness for Node, and the same library for Python child-process stdio. The default is observe, and injection and rug-pull stay on log. `--mcp-enforce` withholds MCP stdio inside the Node or Python process `vantio run` starts, after the awareness library has loaded. A later Node process is covered only when this run started Node and that process still has `NODE_OPTIONS`. A later Python process is covered only when this run started Python and that process still has the python-wrap `PYTHONPATH`, and only for `Popen` children with piped stdin. It does not cover a Python child of a Node run, a Node child of a Python run, a shell such as bash, or HTTP, SSE, or WebSocket MCP. If the Node library does not load, that Node process runs without it. `VANTIO_MCP_AWARENESS=off` does not load it. The path does not add a proxy process. Payload text is not stored. This is not Phantom Engine. Host attachment remains a later step.
 
 **`--json`** on `run`, `demo`, `status`, `discover`, `prove`, `search`, `tail`, `diff`, `coverage`, `destinations`, and `export` prints `"schema_status": "unstable-pre-1.0"`. That shape may change without notice. Field mapping to OpenTelemetry GenAI terms is documented in [docs/optics-otel-mapping.md](../../docs/optics-otel-mapping.md). `vantio export --otlp` sends OTLP/HTTP JSON. `vantio export --otlp-grpc` sends the same fields as unary OTLP/gRPC over HTTP/2. Optics does not start a collector.
 
@@ -113,7 +113,7 @@ Intercepted calls print to the terminal in real time.
 
 ---
 
-## vantio prove — proof artifacts
+## vantio prove — local run reports
 
 ```bash
 vantio prove                           # HTML report — most recent run
@@ -124,7 +124,7 @@ vantio prove --format=html --out=proof.html
 ```
 
 `vantio prove` reads the run logs that `vantio run` automatically writes to
-`~/.vantio/runs/` and generates a self-contained proof document. Reports include
+`~/.vantio/runs/` and generates an unsigned local report. The report is not signed, so it is not proof on its own. Reports include
 trace IDs, process IDs, byte counts, host breakdown, and action labels.
 
 Prompts and completions are never stored.

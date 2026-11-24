@@ -40,7 +40,7 @@ Usage:
   vantio demo                 In-process demo of one observed call (no network)
   vantio status               Local install and data status (no network by default)
   vantio discover [options]   Show AI-agent call history (--local; no key required)
-  vantio prove [options]      Generate a proof artifact from a local run log (no key required)
+  vantio prove [options]      Write an unsigned local HTML or Markdown report from a local run log (no key required)
   vantio search [query]       Search local run logs (host, path, action, free text)
   vantio tail [options]       Show the latest calls from a captured run
   vantio diff <a> <b>         Compare two local runs (hosts, counts, bytes)
@@ -52,6 +52,10 @@ Flags (run):
   --summary, -s   Print a run summary on exit.
   --json          Unstable JSON on stdout when the program exits.
   --mcp-enforce   Opt in to in-process MCP withhold. Default is observe and log.
+                  --mcp-enforce withholds MCP stdio inside the Node or Python
+                  process vantio run starts, after the awareness library has
+                  loaded. It does not cover other programs or other transports.
+                  If the Node library does not load, Node runs without it.
 
 --json output includes "schema_status": "unstable-pre-1.0" and may change without notice.
 
@@ -108,9 +112,9 @@ Examples:
 `;
 
 const PROVE_HELP = `\
-vantio prove — local proof artifacts
+vantio prove — local run reports
 
-Generates a local proof artifact (HTML or Markdown report) from a
+Generates an unsigned local report (HTML or Markdown) from a
 vantio run log. Reports include: trace ID, PID, byte counts, host
 breakdown, and summary counts. Prompts and completions are never stored.
 
@@ -773,7 +777,7 @@ function listRuns(dir) {
   }
   process.stdout.write(`${div}\n${entries.length} run log(s)\n\n`);
   process.stdout.write(
-    "Generate a proof artifact:\n" +
+    "Write an unsigned local report:\n" +
     "  vantio prove                   → most recent run (HTML)\n" +
     "  vantio prove --run=<trace-id>  → specific run\n" +
     "  vantio prove --format=md       → Markdown to stdout\n"
@@ -880,7 +884,7 @@ async function proveCommand(args) {
       process.stdout.write(
         "No local run logs found. Run an agent first:\n" +
         "  vantio run node agent.js\n\n" +
-        "Then generate a proof artifact:\n" +
+        "Then write an unsigned local report:\n" +
         "  vantio prove\n"
       );
       return;
@@ -920,7 +924,7 @@ async function proveCommand(args) {
       process.stderr.write(`vantio prove: could not write ${outPath}: ${detail}\n`);
       process.exit(1);
     }
-    process.stdout.write(`✓ Proof artifact written to: ${outPath}\n`);
+    process.stdout.write(`✓ Unsigned local report written to: ${outPath}\n`);
   }
 
   if (values.out) {

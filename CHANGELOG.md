@@ -54,6 +54,10 @@ The package changelog in this tree records 3.1.1 as a publication of the 3.1.0 b
 
 As of 2026-11-19 the two versions below are also on the registries. The notes under them describe this tree.
 
+### `@vantio/cli` 0.3.28
+
+Sealed in `vantioai/vantio-open-core` (#403), not published: `vantio-cli-0.3.28.tgz`, 98377 bytes, sha256 `994fcc7f58539db61a1e69c8c39388b52105ead4076bacaab7608ab81a5be151`. Wording only. `vantio prove` writes an unsigned local report, which is not signed and uses no key. `--mcp-enforce` withholds MCP stdio inside the Node or Python process `vantio run` starts, after the awareness library has loaded. It does not cover other programs or other transports, and if the Node library does not load, Node runs without it. No recording or enforcement behavior changes.
+
 ### `@vantio/cli` 0.3.26
 
 `packages/vantio-cli/package.json`. Not the npm release.

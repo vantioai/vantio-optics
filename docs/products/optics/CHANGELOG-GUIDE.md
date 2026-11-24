@@ -6,10 +6,10 @@ This manual is version 1. It is a docs set. It does not bump `@vantio/cli`, `van
 
 | You installed | Read |
 | --- | --- |
-| `@vantio/cli@0.3.27` | The published CLI is 0.3.27, the same as this tree. Node pages that name 0.3.24 describe that older release. |
+| `@vantio/cli@0.3.27` | The published CLI is 0.3.27. This tree is 0.3.28, which is not published. Node pages that name 0.3.24 describe that older release. |
 | `vantio-agent-sdk==3.1.2` | [PYTHON-GUIDE.md](PYTHON-GUIDE.md) for the current PyPI release. |
 | `vantio-agent-sdk==3.0.14` | The 3.0.14 sections of [PYTHON-GUIDE.md](PYTHON-GUIDE.md). That pin is older than PyPI latest. |
-| A checkout of this repository | `pyproject.toml` says 3.1.2. That string is source. `pip install` does not install it. |
+| A checkout of this repository | `pyproject.toml` says 3.1.3. That string is source. `pip install` does not install it. |
 
 Package changelogs live next to the packages (`packages/vantio-agent-sdk-py/CHANGELOG.md`). This repository's history starts fresh and does not contain the older release tags. When a changelog line and the published package disagree, the published package wins.
 

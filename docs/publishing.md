@@ -14,7 +14,7 @@ Registry check on 2026-11-19:
 
 | Package | Registry | Latest | This tree |
 | --- | --- | --- | --- |
-| `@vantio/cli` | npm | 0.3.27 | 0.3.27 |
+| `@vantio/cli` | npm | 0.3.27 | 0.3.28 |
 | `@vantio/agent-sdk` | npm | 0.2.4 | 0.2.4 |
 | `@vantio/optics-mcp` | npm | 0.1.2 | 0.1.2 |
 | `vantio-agent-sdk` | PyPI | 3.1.2 | 3.1.2 |

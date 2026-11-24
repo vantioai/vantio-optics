@@ -3,7 +3,7 @@
   "manual_version": 1,
   "audience": "public",
   "contract_version": "unstable-pre-1.0",
-  "registry_checked_utc": "2026-11-19T05:40:00Z",
+  "registry_checked_utc": "2026-11-20T16:17:07Z",
   "copied_from": {
     "repository": "https://github.com/vantioai/vantio-open-core",
     "commit": "75f32310d03a3020b56fd565109ae1f2a19a23bc",
@@ -20,8 +20,8 @@
     }
   },
   "source_tree": {
-    "@vantio/cli": "0.3.27",
-    "vantio-agent-sdk": "3.1.2",
+    "@vantio/cli": "0.3.28",
+    "vantio-agent-sdk": "3.1.3",
     "@vantio/agent-sdk": "0.2.4",
     "@vantio/optics-mcp": "0.1.2"
   },
@@ -29,6 +29,7 @@
     "Unpinned npm install -g @vantio/cli resolves to 0.3.27.",
     "Unpinned pip install vantio-agent-sdk resolves to 3.1.2.",
     "Python 3.0.14 and 3.1.1 remain on PyPI and are not the latest release.",
-    "@vantio/cli 0.3.27 has registry signatures and no provenance attestation. Its registry tarball is byte-identical to open-core artifacts/sealed/vantio-cli-0.3.27.tgz."
+    "@vantio/cli 0.3.27 has registry signatures and no provenance attestation. Its registry tarball is byte-identical to open-core artifacts/sealed/vantio-cli-0.3.27.tgz.",
+    "This tree is @vantio/cli 0.3.28 and vantio-agent-sdk 3.1.3. Both are sealed in vantio-open-core and not published."
   ]
 }
