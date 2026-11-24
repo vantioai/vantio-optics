@@ -27,6 +27,7 @@ import json
 import os
 import shlex
 import socket
+import shutil
 import ssl
 import stat
 import subprocess
@@ -384,6 +385,42 @@ def _allowlist_suppresses(destination: str, allowlist: dict[str, Any]) -> bool:
     return False
 
 
+# The seen lock is held only while seen-destinations.json is rewritten. A lock
+# older than this was left by a process that died holding it, and is taken
+# over (VAN-386). Same rule as the Node CLI.
+_SEEN_LOCK_STALE_S = 10.0
+
+
+def _take_stale_seen_lock(lock: str) -> bool:
+    """Return True when the caller should retry mkdir at once."""
+    try:
+        mtime = os.stat(lock).st_mtime
+    except OSError:
+        return True
+    if time.time() - mtime <= _SEEN_LOCK_STALE_S:
+        return False
+    aside = f"{lock}.stale-{os.getpid()}-{time.time_ns()}"
+    try:
+        os.rename(lock, aside)
+    except OSError:
+        return True
+    try:
+        # Another process may have taken over between our stat and rename.
+        if time.time() - os.stat(aside).st_mtime <= _SEEN_LOCK_STALE_S:
+            try:
+                os.rename(aside, lock)
+            except OSError:
+                pass
+            return False
+    except OSError:
+        return True
+    try:
+        shutil.rmtree(aside, ignore_errors=True)
+    except Exception:
+        pass
+    return True
+
+
 def _note_live(rec: dict[str, Any]) -> None:
     """Record the destination while the call is happening. Does not stop the call."""
     try:
@@ -399,8 +436,11 @@ def _note_live(rec: dict[str, Any]) -> None:
                 os.mkdir(lock, 0o700)
                 break
             except FileExistsError:
+                if _take_stale_seen_lock(lock):
+                    continue
                 if time.time() - started > 2:
                     raise TimeoutError("seen destination file is busy")
+                time.sleep(0.005)
         try:
             allow_path = os.path.join(home, "allowlist.json")
             allowlist: dict[str, Any] = {}
