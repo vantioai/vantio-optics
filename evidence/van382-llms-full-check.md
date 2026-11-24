@@ -56,3 +56,41 @@ Node 22.23.5, pnpm 11.13.0, Python 3.12.3. strace installed.
 - #28 (VAN-347) also adds a CI step after the build step and edits the `test` line in `package.json`. Whichever lands second needs a one-line rebase. Its own test can join the new "Repository tests" step then.
 - #16, #19 and #20 each need `node scripts/check_llms_full.mjs --write` on their branch. That is done on those PRs separately, not here.
 - `llms.txt` (the short index) is not checked; it lists links, not page text.
+
+## Follow-up commit (Nov 24 review)
+
+Base: vantio-optics `a95b9c3` (the previous head of this branch). No open-core mirror: no package source changes.
+
+**Finding.** The new CI step and `pnpm test` name the root test files one by one. Open draft PR #37 (VAN-395) adds `test/extension-output.test.js`. On a merge of both, that test is in the tree, but neither CI nor `pnpm test` runs it. Checked on a scratch merge of all open PRs: `test/` holds four files and the step names three.
+
+**Change.** `.github/workflows/ci.yml` and the root `package.json` `test` script run `node --test test/*.test.js`, so a new root test runs without editing either file.
+
+**Tests.** `test/root-tests-run.test.js` (3): the CI step is `node --test test/*.test.js`; `pnpm test` ends with the same command; the glob finds the existing root tests. With `ci.yml` and `package.json` back on `a95b9c3`, the first two fail and the third passes.
+
+Run on the working tree of this commit (drift against open-core `main` `1beaf36`):
+
+**vantio-optics**
+
+| Command | rc | Result |
+| --- | --- | --- |
+| `corepack pnpm install --frozen-lockfile` | 0 |  |
+| `pnpm --filter @vantio/cli run lint` | 0 |  |
+| `pnpm --filter @vantio/optics-mcp run lint` | 0 |  |
+| `pnpm --filter @vantio/agent-sdk run typecheck` | 0 |  |
+| `pnpm --filter @vantio/agent-sdk run typecheck:test` | 0 |  |
+| `pnpm --filter @vantio/cli run test` | 0 | 179 pass, 0 fail |
+| `pnpm --filter @vantio/optics-mcp run test` | 0 | 8 pass, 0 fail |
+| `pnpm --filter @vantio/agent-sdk run test` | 0 | 42 pass, 0 fail |
+| `pnpm --filter @vantio/agent-sdk run build` | 0 |  |
+| `node --test test/*.test.js` | 0 | 17 pass, 0 fail |
+| `node scripts/check_llms_full.mjs` | 0 |  |
+| Python 3.10 `-m unittest discover -s packages/vantio-agent-sdk-py/tests -t packages/vantio-agent-sdk-py` | 0 | 128 run, OK (skipped=2) |
+| Python 3.11, same suite | 0 | 128 run, OK (skipped=2) |
+| Python 3.12, same suite | 0 | 128 run, OK (skipped=2) |
+| secret scan (`git grep` patterns from the repo rules) | 0 |  |
+| `llms-full.txt` against the manual pages | 0 |  |
+| `python3 scripts/check_open_core_drift.py <open-core mirror worktree>` | 1 | (only `packages/vantio-optics-mcp/src/server.js`, the known VAN-310 drift) |
+
+### Gaps
+
+- CI did not run: the org billing lock (VAN-129). The workflow change is checked by the test above, not by a CI run.
