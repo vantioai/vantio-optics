@@ -430,11 +430,33 @@ function bufferedBody(init) {
   return null;
 }
 
+// A body is a JSON-RPC message when it parses to an object with a top-level
+// "jsonrpc" key, or to a batch (array) holding one. The MCP TypeScript SDK
+// writes "jsonrpc" after "method" and "params", so the key can be anywhere in
+// the body (VAN-405). A prompt that only mentions "jsonrpc" is not a message.
+// A body that does not parse but carries the key still goes to the policy,
+// which records it as malformed.
+const JSONRPC_KEY = Buffer.from('"jsonrpc"');
+
+function isRpcObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    && Object.prototype.hasOwnProperty.call(value, "jsonrpc");
+}
+
 function looksLikeJsonRpc(buf) {
   if (!Buffer.isBuffer(buf) || buf.length === 0 || buf.length > MAX_FRAME) return false;
-  const head = buf.subarray(0, Math.min(buf.length, 256)).toString("utf8").trimStart();
-  if (!head.startsWith("{")) return false;
-  return /"jsonrpc"\s*:/.test(head);
+  if (buf.indexOf(JSONRPC_KEY) < 0) return false;
+  const text = buf.toString("utf8").trim();
+  if (!text.startsWith("{") && !text.startsWith("[")) return false;
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    // Same rule as before for a body that does not parse.
+    return text.startsWith("{") && /"jsonrpc"\s*:/.test(text.slice(0, 256));
+  }
+  if (Array.isArray(parsed)) return parsed.some(isRpcObject);
+  return isRpcObject(parsed);
 }
 
 function serverIdFromInput(input) {
