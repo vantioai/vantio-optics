@@ -28,7 +28,7 @@ const {
   recordWrappedRun,
   watchLiveJournal,
 } = require("./optics-features.cjs");
-const { createWrapSampler } = require("./optics-proc.cjs");
+const { createWrapSampler, signalFromTerminal } = require("./optics-proc.cjs");
 
 const USAGE = `\
 Vantio Optics | Free Observability for AI Agents
@@ -441,15 +441,22 @@ function runCommand(rest) {
   }
 
   // A stop signal sent to the wrapper must reach the program (VAN-402).
-  // SIGTERM is forwarded. SIGINT, SIGHUP and SIGQUIT come from the terminal
-  // to the whole process group, so the child already has them: the wrapper
-  // only stays up until the child exits instead of dying first.
+  // SIGTERM is forwarded. SIGINT, SIGHUP and SIGQUIT from the terminal go to
+  // the whole process group, so the child already has them and they are not
+  // sent again. The same signals from anywhere else (kill, a supervisor, a
+  // parent process) are forwarded. Either way the wrapper stays up until the
+  // child exits instead of dying first.
   const signalHandlers = new Map();
   if (process.platform !== "win32") {
     signalHandlers.set("SIGTERM", () => {
       try { child.kill("SIGTERM"); } catch { /* the child is gone */ }
     });
-    for (const sig of ["SIGINT", "SIGHUP", "SIGQUIT"]) signalHandlers.set(sig, () => {});
+    for (const sig of ["SIGINT", "SIGHUP", "SIGQUIT"]) {
+      signalHandlers.set(sig, () => {
+        if (signalFromTerminal()) return;
+        try { child.kill(sig); } catch { /* the child is gone */ }
+      });
+    }
     for (const [sig, handler] of signalHandlers) process.on(sig, handler);
   }
   function releaseSignals() {
