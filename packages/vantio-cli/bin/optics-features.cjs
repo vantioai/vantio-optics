@@ -29,7 +29,7 @@ const { parseArgs } = require("node:util");
 const { SCHEMA_STATUS, normalizeHttpStatus, withSchema } = require("./optics-cx.cjs");
 const { LLM_HOSTS, catalogInScope } = require("./llm-hosts.cjs");
 const { discoverUncovered } = require("./optics-proc.cjs");
-const { deliverOtlpGrpc } = require("./optics-otlp-grpc.cjs");
+const { deliverOtlpGrpc, grpcOrigin } = require("./optics-otlp-grpc.cjs");
 
 const COVERAGE_SCHEMA = "vantio.optics.coverage.v1";
 const ALLOWLIST_SCHEMA = "vantio.optics.allowlist.v1";
@@ -1550,6 +1550,24 @@ async function deliverExport(events, options) {
   return sinks;
 }
 
+// Every destination is checked before anything is read or sent. A URL that
+// is refused never becomes valid, so --follow must not retry it, and a
+// one-shot export must not send to one destination and then refuse the next
+// (VAN-409). deliverExport() still checks each one again before it sends.
+function checkExportSinks(sinks) {
+  if (sinks.otlp) assertExportUrl(sinks.otlp, "otlp");
+  if (sinks.webhook) assertExportUrl(sinks.webhook, "webhook");
+  if (sinks.otlpGrpc) {
+    try {
+      grpcOrigin(sinks.otlpGrpc);
+    } catch (err) {
+      if (err instanceof TypeError) throw new Error("otlp grpc URL is not valid");
+      throw err;
+    }
+  }
+  if (sinks.syslog) parseSyslogTarget(sinks.syslog);
+}
+
 function alertsInWindow(alerts, cutoff) {
   if (cutoff == null) return alerts;
   return alerts.filter((alert) => inWindow(alert.first_connection, cutoff));
@@ -1724,6 +1742,11 @@ async function exportCommand(args) {
   }
   if (values.jsonl === "-" && values.syslog === "-") {
     fail("export", "--jsonl=- and --syslog=- both write to stdout");
+  }
+  try {
+    checkExportSinks(sinks);
+  } catch (err) {
+    fail("export", detailOf(err));
   }
   if (values.follow) {
     await runFollowExport(sinks);
@@ -2292,6 +2315,7 @@ module.exports = {
   assertExportUrl,
   buildCoverage,
   buildExportBundle,
+  checkExportSinks,
   collectObservations,
   coverageCommand,
   deliverExport,
