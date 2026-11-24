@@ -19,7 +19,7 @@
 "use strict";
 
 const { randomUUID } = require("node:crypto");
-const { mkdirSync, writeFileSync, statSync, fstatSync, readFileSync, openSync, readSync, closeSync } = require("node:fs");
+const { mkdirSync, writeFileSync, statSync, fstatSync, readFileSync, openSync, readSync, closeSync, renameSync, unlinkSync, constants: fsConstants } = require("node:fs");
 const { homedir, hostname } = require("node:os");
 const { join, basename } = require("node:path");
 const { AsyncLocalStorage } = require("node:async_hooks");
@@ -2029,6 +2029,152 @@ globalThis.fetch = function vantioFetch(input, init) {
   cp.__vantioCurlPatched = true;
 })();
 
+// ── run log merge ───────────────────────────────────────────────────────────
+// Every Node process in one `vantio run` shares VANTIO_TRACE_ID and so writes
+// the same <trace>.json. `vantio run` also sets VANTIO_RUN_ID for the tree.
+// A writer merges its calls into a log that carries the same run id, under a
+// short lock, so a parent's exit does not erase a child's calls (VAN-387).
+// Without a run id (no `vantio run`), the file is replaced as before.
+
+const RUN_ID = typeof process.env.VANTIO_RUN_ID === "string" && process.env.VANTIO_RUN_ID
+  ? process.env.VANTIO_RUN_ID.slice(0, 128)
+  : null;
+
+const RUN_LOG_LOCK_WAIT_MS = 2000;
+const RUN_LOG_LOCK_STALE_MS = 10000;
+
+function sleepSync(ms) {
+  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch { /* no wait */ }
+}
+
+// Hold <path>.lock while fn runs. After the wait it runs fn anyway: a run log
+// write must never hold up the agent's exit for long.
+function withRunLogLock(path, fn) {
+  const lock = `${path}.lock`;
+  const deadline = Date.now() + RUN_LOG_LOCK_WAIT_MS;
+  let fd = null;
+  for (;;) {
+    try {
+      fd = openSync(lock, "wx", 0o600);
+      break;
+    } catch (err) {
+      if (!err || err.code !== "EEXIST") break;
+      try {
+        if (Date.now() - statSync(lock).mtimeMs > RUN_LOG_LOCK_STALE_MS) {
+          unlinkSync(lock);
+          continue;
+        }
+      } catch { continue; }
+      if (Date.now() >= deadline) break;
+      sleepSync(10);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    if (fd != null) {
+      try { closeSync(fd); } catch { /* closed */ }
+      try { unlinkSync(lock); } catch { /* gone */ }
+    }
+  }
+}
+
+// The existing run log, read only when it is a regular file of this run.
+function readExistingRunLog(path, traceId, runId) {
+  if (!runId) return null;
+  let fd;
+  try {
+    fd = openSync(path, fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK || 0) | (fsConstants.O_NOFOLLOW || 0));
+  } catch {
+    return null;
+  }
+  try {
+    const info = fstatSync(fd);
+    if (!info.isFile() || info.size > 512 * 1024 * 1024) return null;
+    const buf = Buffer.alloc(info.size);
+    let off = 0;
+    while (off < buf.length) {
+      const n = readSync(fd, buf, off, buf.length - off, off);
+      if (n === 0) break;
+      off += n;
+    }
+    const json = JSON.parse(buf.subarray(0, off).toString("utf8"));
+    if (!json || typeof json !== "object" || json.vantio_run_log !== "1") return null;
+    if (json.trace_id !== traceId || json.run_id !== runId || !Array.isArray(json.calls)) return null;
+    return json;
+  } catch {
+    return null;
+  } finally {
+    try { closeSync(fd); } catch { /* closed */ }
+  }
+}
+
+function summarizeCalls(calls) {
+  const by_host = {};
+  const by_provider = {};
+  let errors = 0;
+  let totalBytes = 0;
+  for (const call of calls) {
+    if (!call || typeof call !== "object") continue;
+    const bytes = Number.isFinite(call.bytes) ? call.bytes : 0;
+    const failed = Boolean(call.error || call.ok === false);
+    const h = call.hostname || "unknown";
+    const p = call.provider || "unknown";
+    totalBytes += bytes;
+    if (failed) errors += 1;
+    by_host[h] = by_host[h] || { calls: 0, bytes: 0, errors: 0 };
+    by_host[h].calls += 1;
+    by_host[h].bytes += bytes;
+    if (failed) by_host[h].errors += 1;
+    by_provider[p] = by_provider[p] || { calls: 0, bytes: 0 };
+    by_provider[p].calls += 1;
+    by_provider[p].bytes += bytes;
+  }
+  const valid = calls.filter((call) => call && typeof call === "object");
+  return {
+    total_calls: valid.length,
+    total_bytes: totalBytes,
+    hosts: [...new Set(valid.map((x) => x.hostname))],
+    providers: [...new Set(valid.map((x) => x.provider).filter(Boolean))],
+    errors,
+    by_host,
+    by_provider,
+  };
+}
+
+// Merge this process's log into the one already written for the same trace.
+// The process that started first keeps the run identity (pid, program, start).
+function mergeRunLog(existing, mine) {
+  if (!existing) return mine;
+  const started = (log) => {
+    const t = Date.parse(log && log.started_at);
+    return Number.isFinite(t) ? t : Infinity;
+  };
+  const first = started(existing) <= started(mine) ? existing : mine;
+  const calls = existing.calls.concat(mine.calls);
+  const startMs = Math.min(started(existing), started(mine));
+  const endMs = Math.max(Date.parse(existing.generated_at) || 0, Date.parse(mine.generated_at) || 0);
+  const identity = {};
+  for (const key of ["program", "system_hostname", "pid", "ppid", "node_version", "platform", "arch", "started_at", "cli_version"]) {
+    if (first[key] !== undefined) identity[key] = first[key];
+  }
+  return Object.assign({}, existing, mine, identity, {
+    generated_at: new Date(endMs || Date.now()).toISOString(),
+    duration_ms: Number.isFinite(startMs) && endMs ? Math.max(0, endMs - startMs) : mine.duration_ms,
+    calls,
+    summary: Object.assign({}, existing.summary, mine.summary, summarizeCalls(calls)),
+  });
+}
+
+function writeRunLogMerged(logPath, log) {
+  withRunLogLock(logPath, () => {
+    const merged = mergeRunLog(readExistingRunLog(logPath, log.trace_id, log.run_id), log);
+    const tmp = `${logPath}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(merged, null, 2) + "\n", { mode: 0o600 });
+    renameSync(tmp, logPath);
+  });
+}
+
 process.on("exit", () => {
   // `vantio run --summary` sets VANTIO_SUMMARY=1. Recorded calls already print
   // this local summary. The flag does not hide it and does not invent one
@@ -2071,6 +2217,7 @@ process.on("exit", () => {
       plane: "optics",
       data_note: "Developer egress data log — metadata only; never prompts or completions.",
       trace_id:    RUN_TRACE_ID,
+      ...(RUN_ID ? { run_id: RUN_ID } : {}),
       program:     programLabelFromArgv(process.argv),
       system_hostname: hostname(),
       pid:         process.pid,
@@ -2120,7 +2267,7 @@ process.on("exit", () => {
     };
     const safeid   = RUN_TRACE_ID.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 80);
     const logPath  = join(runsDir, `${safeid}.json`);
-    writeFileSync(logPath, JSON.stringify(log, null, 2) + "\n", { mode: 0o600 });
+    writeRunLogMerged(logPath, log);
   } catch {
     // Non-fatal — never let log writing affect the exiting agent.
   }
