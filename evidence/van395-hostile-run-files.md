@@ -55,3 +55,69 @@ Mutation check: with the five source files put back to `main`, the new tests fai
 - The extension test uses a fake `vscode` module. It was not run inside VS Code.
 - `vantio prove --from` still follows a symlink by design.
 - Ships only at the next CLI and optics-mcp releases, with Zach's go.
+
+## Follow-up commit (Nov 24 review)
+
+Base: vantio-optics `2414371`, vantio-open-core `7cca2f9` (the previous heads of this branch).
+
+**Findings.**
+
+1. `writeOwnerOnly()` opened every `--out` path with `O_NOFOLLOW`. So `vantio prove --out=/dev/stdout`, `--out=/dev/fd/1` and a shell's `>(...)` (also `/dev/fd/N`) failed with ELOOP. They worked on `main`. Reproduced on `2414371`: `prove --out=/dev/stdout` exited 1 with "could not write /dev/stdout: ELOOP".
+2. It called `fchmod(0600)` on whatever it opened, including a FIFO or a device. `sudo vantio prove --out=/dev/null` would change the mode of `/dev/null` for every user. Reproduced with a FIFO: its mode changed from 0644 to 0600.
+
+**Change** (`packages/vantio-cli/bin/vantio.js`):
+
+- `/dev/stdout`, `/dev/stderr`, `/dev/fd/N` and `/proc/self/fd/N` write to that descriptor of this process.
+- Any other symlink is opened without `O_CREAT` or `O_TRUNC`, and written only when it is not a regular file. A symlink to a regular file is still refused, and that file is not touched.
+- Only a regular file is made 0600.
+- `writeAllSync()` writes the whole proof and waits briefly on EAGAIN, for a pipe that another process set to non-blocking.
+
+**Tests** (`proof-out-target.test.js`, 6): `--out=/dev/stdout` and `--out=/dev/fd/1` write the proof to stdout; a symlink to `/dev/null` is followed; a named pipe keeps its mode 0644; a symlink to a regular file is still refused and the file keeps its content and mode (negative case); a regular `--out` file is still made 0600 (negative case). The 10 tests in `hostile-run-files.test.js` still pass. By hand, an 889 KB proof went to `/dev/stdout` through a slow pipe reader with rc 0.
+
+Mutation check: with `vantio.js` back on `2414371`, four fail and the two negative cases pass.
+
+Run on the working tree of this commit:
+
+**vantio-optics**
+
+| Command | rc | Result |
+| --- | --- | --- |
+| `corepack pnpm install --frozen-lockfile` | 0 |  |
+| `pnpm --filter @vantio/cli run lint` | 0 |  |
+| `pnpm --filter @vantio/optics-mcp run lint` | 0 |  |
+| `pnpm --filter @vantio/agent-sdk run typecheck` | 0 |  |
+| `pnpm --filter @vantio/agent-sdk run typecheck:test` | 0 |  |
+| `pnpm --filter @vantio/cli run test` | 0 | 195 pass, 0 fail |
+| `pnpm --filter @vantio/optics-mcp run test` | 0 | 15 pass, 0 fail |
+| `pnpm --filter @vantio/agent-sdk run test` | 0 | 42 pass, 0 fail |
+| `pnpm --filter @vantio/agent-sdk run build` | 0 |  |
+| `node --test test/*.test.js` | 0 | 7 pass, 0 fail |
+| `node scripts/check_llms_full.mjs` | absent |  |
+| Python 3.10 `-m unittest discover -s packages/vantio-agent-sdk-py/tests -t packages/vantio-agent-sdk-py` | 0 | 128 run, OK (skipped=2) |
+| Python 3.11, same suite | 0 | 128 run, OK (skipped=2) |
+| Python 3.12, same suite | 0 | 128 run, OK (skipped=2) |
+| secret scan (`git grep` patterns from the repo rules) | 0 |  |
+| `llms-full.txt` against the manual pages | 0 |  |
+| `python3 scripts/check_open_core_drift.py <open-core mirror worktree>` | 1 | (only `packages/vantio-optics-mcp/src/server.js`, the known VAN-310 drift) |
+
+**vantio-open-core mirror**
+
+| Command | rc | Result |
+| --- | --- | --- |
+| `corepack pnpm install --frozen-lockfile` | 0 |  |
+| `pnpm --filter @vantio/cli run lint` | 0 |  |
+| `pnpm --filter @vantio/cli run test` | 0 | 195 pass, 0 fail |
+| `pnpm --filter @vantio/optics-mcp run lint` | 0 |  |
+| `pnpm --filter @vantio/optics-mcp test` | 0 | 12 pass, 0 fail |
+| Python 3.10 `-m unittest discover -s tests -t .` (in `packages/vantio-agent-sdk-py`) | 1 | 128 run, FAILED (failures=1, skipped=2) (fails: `test_wheel_and_sdist_runtime_sources_match`) |
+| Python 3.11, same suite | 1 | 128 run, FAILED (failures=1, skipped=2) (fails: `test_wheel_and_sdist_runtime_sources_match`) |
+| Python 3.12, same suite | 1 | 128 run, FAILED (failures=1, skipped=2) (fails: `test_wheel_and_sdist_runtime_sources_match`) |
+| `node scripts/release/ws11/verify.mjs --emit` | 0 |  |
+| `git status --porcelain` the same before and after `--emit` | 0 |  |
+
+### Gaps
+
+- CI did not run: the org billing lock (VAN-129).
+- Writing to `/dev/stdout` when stdout is a file opened with `>>` appends, as the shell set it up. Not tested.
+- Not tested on macOS. Windows keeps the earlier path (no `/dev/fd`).
+- Ships only at the next CLI release, with Zach's go.

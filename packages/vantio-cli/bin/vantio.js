@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { basename, dirname, join } from "node:path";
 import { homedir, hostname } from "node:os";
-import { closeSync, constants as fsConstants, fchmodSync, lstatSync, mkdirSync, openSync, readFileSync, writeFileSync, rmSync, readdirSync, statSync, existsSync, watch } from "node:fs";
+import { closeSync, constants as fsConstants, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, writeFileSync, rmSync, readdirSync, statSync, existsSync, watch, writeSync } from "node:fs";
 import { randomUUID }    from "node:crypto";
 
 const require = createRequire(import.meta.url);
@@ -833,12 +833,60 @@ function readJsonFile(path, options) {
   }
 }
 
-// The proof is written for the owner only and never through a symlink at the target.
+// An --out path that names one of this process's own open descriptors.
+function ownDescriptor(path) {
+  if (path === "/dev/stdout") return 1;
+  if (path === "/dev/stderr") return 2;
+  const match = /^(?:\/dev\/fd|\/proc\/self\/fd)\/(\d+)$/.exec(String(path));
+  return match ? Number(match[1]) : null;
+}
+
+// Write all of text to fd. A pipe set to non-blocking by another process can
+// answer EAGAIN when it is full; wait briefly and go on (at most 30 s).
+function writeAllSync(fd, text) {
+  const buf = Buffer.from(text, "utf8");
+  const deadline = Date.now() + 30000;
+  let off = 0;
+  while (off < buf.length) {
+    try {
+      off += writeSync(fd, buf, off, buf.length - off);
+    } catch (err) {
+      if (!err || err.code !== "EAGAIN" || Date.now() > deadline) throw err;
+      try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5); } catch { /* retry at once */ }
+    }
+  }
+}
+
+// The proof is written for the owner only and never through a symlink onto a
+// file. /dev/stdout, /dev/stderr and /dev/fd/N write to that descriptor. A
+// symlink to a pipe, a terminal or another device is followed, because
+// writing there cannot replace a file. Only a regular file is made 0600, so
+// --out=/dev/null does not change /dev/null.
 function writeOwnerOnly(path, text) {
-  const flags = fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | (fsConstants.O_NOFOLLOW || 0);
-  const fd = openSync(path, flags, 0o600);
+  const own = process.platform === "win32" ? null : ownDescriptor(path);
+  if (own != null) {
+    writeAllSync(own, text);
+    return;
+  }
+  const nofollow = fsConstants.O_NOFOLLOW || 0;
+  let fd;
   try {
-    fchmodSync(fd, 0o600);
+    fd = openSync(path, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | nofollow, 0o600);
+  } catch (err) {
+    if (!err || err.code !== "ELOOP" || !nofollow) throw err;
+    // A symlink. Open what it names without O_CREAT or O_TRUNC, so nothing is
+    // created or cut, and write only when it is not a regular file.
+    const linked = openSync(path, fsConstants.O_WRONLY);
+    try {
+      if (fstatSync(linked).isFile()) throw err;
+      writeAllSync(linked, text);
+    } finally {
+      closeSync(linked);
+    }
+    return;
+  }
+  try {
+    if (fstatSync(fd).isFile()) fchmodSync(fd, 0o600);
     writeFileSync(fd, text, "utf8");
   } finally {
     closeSync(fd);
