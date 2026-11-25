@@ -6,7 +6,8 @@ generator runs it for a checkout of main, so both sides use the same code.
     python3 -I van394_shapes_runner.py <sdk-dir> <fixture.json> <work-dir> <group>
 
 <group> is "shapes" (the shapes main can run) or "special" (FIFO, socket,
-/dev/stdin and the other files main cannot be run on). It prints one JSON
+/dev/stdin and the other files main cannot be run on) or "procfs" (regular files
+that report size 0, from /proc/<pid>/environ of a sleeping child). It prints one JSON
 object: {"hosts": {id: [host or null, ...]}, "max_spawn_ms": n}.
 
 Every command is a stand-in on PATH that exits 0. No network call is made.
@@ -27,11 +28,34 @@ import time
 MARK = "mark.example.test"
 
 
-def make_files(doc: dict, files_dir: str) -> list:
+def proc_env_file(path: str, entry: str, sleepers: list) -> None:
+    """A regular file that reports size 0 and has content: /proc/<pid>/environ of a sleeping child."""
+    key, _, value = entry.partition("=")
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"], env={key: value},
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    sleepers.append(child)
+    environ = f"/proc/{child.pid}/environ"
+    until = time.monotonic() + 10
+    # Right after the start the child may still show the parent's environment.
+    while time.monotonic() < until:
+        try:
+            with open(environ, "rb") as fh:
+                if fh.read().decode("utf-8", "replace").startswith(entry):
+                    break
+        except OSError:
+            pass
+        time.sleep(0.05)
+    os.symlink(environ, path)
+
+
+def make_files(doc: dict, files_dir: str, group: str, sleepers: list) -> list:
     keep = []
     for name, spec in doc["files"].items():
         path = os.path.join(files_dir, name)
-        if spec.get("fifo"):
+        if spec.get("procenv"):
+            if group == "procfs":
+                proc_env_file(path, spec["procenv"], sleepers)
+        elif spec.get("fifo"):
             os.mkfifo(path)
         elif spec.get("socket"):
             sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -62,7 +86,8 @@ def main() -> None:
         with open(path, "w", encoding="utf-8") as fh:
             fh.write("#!/bin/sh\nexit 0\n")
         os.chmod(path, 0o755)
-    keep = make_files(doc, files_dir)
+    sleepers: list = []
+    keep = make_files(doc, files_dir, group, sleepers)
     os.environ.update({
         "VANTIO_HOME": home,
         "HOME": home,
@@ -95,6 +120,8 @@ def main() -> None:
             worker.join(180)
             if worker.is_alive():
                 print("HANG", file=sys.stderr)
+                for child in sleepers:
+                    child.kill()
                 os._exit(3)
 
     asyncio.run(run())
@@ -109,6 +136,8 @@ def main() -> None:
     per.pop()
     result = {shape["id"]: per[i] for i, shape in enumerate(shapes)}
     print(json.dumps({"hosts": result, "max_spawn_ms": max(spans) if spans else 0}))
+    for child in sleepers:
+        child.kill()
     del keep
 
 

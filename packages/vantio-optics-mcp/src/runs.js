@@ -26,7 +26,7 @@ export function listRunLogs(dir = runsDir()) {
       const log = JSON.parse(raw);
       if (log?.vantio_run_log !== "1") continue;
       const st = statSync(path);
-      const calls = countedCalls(Array.isArray(log.calls) ? log.calls : []);
+      const calls = logCountedCalls(log);
       const summary = log.summary || {};
       entries.push({
         path,
@@ -58,6 +58,18 @@ export function listRunLogs(dir = runsDir()) {
 // CLI's optics-cx.cjs. A test in the CLI keeps the two in step.
 export function countedCalls(calls) {
   return calls.filter((c) => c && c.hostname);
+}
+
+// A log written before option A has no `calls_without_host` in its summary.
+// It is read as main read it: every call counts, and no no-host count or line
+// is shown. Copies of hasNoHostField and logCountedCalls in optics-cx.cjs.
+export function hasNoHostField(log) {
+  return typeof log?.summary?.calls_without_host === "number";
+}
+
+export function logCountedCalls(log) {
+  const calls = Array.isArray(log?.calls) ? log.calls : [];
+  return hasNoHostField(log) ? countedCalls(calls) : calls;
 }
 
 export function loadRun(traceOrPrefix, dir = runsDir()) {
@@ -94,11 +106,10 @@ export function loadRun(traceOrPrefix, dir = runsDir()) {
 
 export function proveMarkdown(log) {
   const calls = Array.isArray(log.calls) ? log.calls : [];
-  const counted = countedCalls(calls);
+  const counted = logCountedCalls(log);
   const summary = log.summary || {};
-  // A log written before option A has no `calls_without_host` and its summary
-  // counts a call with no known host, so the note is for new logs only.
-  const noHost = typeof summary.calls_without_host === "number" ? calls.length - counted.length : 0;
+  // For a log from before option A every call counts, so there is no note.
+  const noHost = calls.length - counted.length;
   const totalCalls = summary.total_calls ?? counted.length;
   const totalBytes = summary.total_bytes ?? counted.reduce((a, c) => a + (c.bytes || 0), 0);
   const hosts = Array.isArray(summary.hosts)
@@ -178,12 +189,14 @@ export function discoverLocal(sinceMs = 7 * 24 * 60 * 60 * 1000, dir = runsDir()
       continue;
     }
     const calls = Array.isArray(log.calls) ? log.calls : [];
+    const optionA = hasNoHostField(log);
     for (const c of calls) {
-      if (!c || !c.hostname) {
+      if (!c || (!c.hostname && optionA)) {
         noHostCalls += 1;
         continue;
       }
-      const host = c.hostname;
+      // A log from before option A: a call with no host is `unknown`, as before.
+      const host = c.hostname || "unknown";
       const row = hostMap.get(host) || {
         hostname: host,
         calls: 0,

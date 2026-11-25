@@ -26,7 +26,7 @@ const dgram = require("node:dgram");
 const net = require("node:net");
 const { parseArgs } = require("node:util");
 
-const { SCHEMA_STATUS, countedCalls, normalizeHttpStatus, withSchema } = require("./optics-cx.cjs");
+const { SCHEMA_STATUS, countedCalls, hasNoHostField, normalizeHttpStatus, withSchema } = require("./optics-cx.cjs");
 const { LLM_HOSTS, catalogInScope } = require("./llm-hosts.cjs");
 const { discoverUncovered } = require("./optics-proc.cjs");
 const { deliverOtlpGrpc } = require("./optics-otlp-grpc.cjs");
@@ -522,8 +522,9 @@ function observationFromCall(log, call, seq, localHost) {
     destination: destination || "unknown",
     display: destination || "unknown",
     // VAN-394: a call with no known host is listed as a connection, but it
-    // gets no destination row and is left out of the connection count.
-    no_host: !destination,
+    // gets no destination row and is left out of the connection count. A log
+    // from before option A is read as main read it: the call is `unknown`.
+    no_host: !destination && hasNoHostField(log),
     method: cleanToken(call && call.method, 16),
     path: stripPath(call && call.path),
     bytes: callBytes(call),
@@ -1207,8 +1208,10 @@ function resourceAttributes(resource) {
 }
 
 function eventAttributes(event) {
-  return attributesOf([
-    ["server.address", event.destination],
+  // VAN-394: a call with no known host has no `server.address`. It is marked
+  // `vantio.no_host`, and it is left out of the byte metric (see otlpPayloads).
+  const attributes = attributesOf([
+    ["server.address", event.no_host ? null : event.destination],
     ["vantio.program", event.program],
     ["vantio.trace_id", event.trace_id],
     ["vantio.authority", event.authority],
@@ -1220,6 +1223,8 @@ function eventAttributes(event) {
     ["gen_ai.provider.name", event.provider],
     ["vantio.mediation", event.mediation],
   ]);
+  if (event.no_host) attributes.push({ key: "vantio.no_host", value: { boolValue: true } });
+  return attributes;
 }
 
 function otlpPayloads(events, resource) {
@@ -1229,7 +1234,7 @@ function otlpPayloads(events, resource) {
     return {
       traceId: event.otel_trace_id,
       spanId: event.otel_span_id,
-      name: `${event.method || "connect"} ${event.destination}`.slice(0, 128),
+      name: (event.no_host ? `${event.method || "connect"} (no host)` : `${event.method || "connect"} ${event.destination}`).slice(0, 128),
       kind: 3,
       startTimeUnixNano: start,
       endTimeUnixNano: start,
@@ -1241,7 +1246,7 @@ function otlpPayloads(events, resource) {
   });
   const totals = new Map();
   for (const event of observations) {
-    if (event.bytes == null) continue;
+    if (event.bytes == null || event.no_host) continue;
     const key = `${event.destination}\n${event.program}`;
     const row = totals.get(key) || {
       destination: event.destination,

@@ -1632,7 +1632,10 @@ globalThis.fetch = function vantioFetch(input, init) {
   // changed after the stat; then it is closed without a read.
   // Returns the bytes, or null. A FIFO, device or socket is added to `skipped`.
   // So is a regular file larger than the cap: the part that was not read could
-  // hold a URL.
+  // hold a URL. The size that stat reports is not trusted (procfs and sysfs
+  // report 0 for a file that has content), so the file is read to its end, up
+  // to cap + 1 bytes. For a file over the cap, the last line that the cap cut
+  // is dropped, so no partial URL is parsed.
   function readRegularFile(path, cap, skipped) {
     const p = String(path || "");
     const skip = () => {
@@ -1648,15 +1651,22 @@ globalThis.fetch = function vantioFetch(input, init) {
     try {
       const st = fstatSync(fd);
       if (!st.isFile()) return isSpecialFile(st) ? skip() : null;
-      if (Number(st.size) > cap && Array.isArray(skipped)) skipped.push(p);
-      const buf = Buffer.alloc(Math.min(Number(st.size) || 0, cap));
+      const chunks = [];
       let got = 0;
-      while (got < buf.length) {
-        const n = readSync(fd, buf, got, buf.length - got, got);
+      while (got <= cap) {
+        const want = Math.min(65536, cap + 1 - got);
+        const chunk = Buffer.alloc(want);
+        const n = readSync(fd, chunk, 0, want, null);
         if (n <= 0) break;
+        chunks.push(chunk.slice(0, n));
         got += n;
       }
-      return buf.slice(0, got);
+      const all = Buffer.concat(chunks);
+      if (all.length <= cap) return all;
+      if (Array.isArray(skipped)) skipped.push(p);
+      if (all[cap] === 0x0a) return all.slice(0, cap);
+      const nl = all.lastIndexOf(0x0a, cap - 1);
+      return nl < 0 ? Buffer.alloc(0) : all.slice(0, nl + 1);
     } finally {
       closeSync(fd);
     }

@@ -1662,7 +1662,8 @@ def _read_regular_file(path: str, cap: int, skipped: Optional[list[str]] = None)
     changed after the stat; then it is closed without a read.
 
     A FIFO, device or socket is added to ``skipped``. So is a regular file
-    larger than the cap: the part that was not read could hold a URL.
+    larger than the cap: the part that was not read could hold a URL. For such
+    a file the last line that the cap cut is dropped.
     /dev/stdin, /dev/fd/N and /proc/self/fd/N name the child's descriptors
     once it runs; here they would name ours, so they are never opened.
     """
@@ -1684,17 +1685,27 @@ def _read_regular_file(path: str, cap: int, skipped: Optional[list[str]] = None)
         mode = opened.st_mode
         if not stat.S_ISREG(mode):
             return skip() if _is_special_file(mode) else None
-        if opened.st_size > cap and skipped is not None:
-            skipped.append(path)
+        # The size that stat reports is not trusted (procfs and sysfs report 0
+        # for a file that has content): read to the end, up to cap + 1 bytes.
         chunks: list[bytes] = []
-        left = cap
+        left = cap + 1
         while left > 0:
             chunk = os.read(fd, left)
             if not chunk:
                 break
             chunks.append(chunk)
             left -= len(chunk)
-        return b"".join(chunks)
+        data = b"".join(chunks)
+        if len(data) <= cap:
+            return data
+        # Over the cap: the last line that the cap cut is dropped, so no
+        # partial URL is parsed.
+        if skipped is not None:
+            skipped.append(path)
+        if data[cap : cap + 1] == b"\n":
+            return data[:cap]
+        nl = data.rfind(b"\n", 0, cap)
+        return b"" if nl < 0 else data[: nl + 1]
     finally:
         os.close(fd)
 

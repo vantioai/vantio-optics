@@ -41,7 +41,7 @@
    "text": "url-query = api.openai.com\nurl = \"http://example.com/\"\n"
   },
   "cfg-bom": {
-   "text": "\ufeffurl = \"https://api.openai.com/v1\"\n"
+   "text": "﻿url = \"https://api.openai.com/v1\"\n"
   },
   "cfg-cr": {
    "text": "user-agent = \"x\rurl = https://api.openai.com/v1\"\nurl = \"http://example.com/\"\n"
@@ -50,10 +50,10 @@
    "text": "user-agent = \"x\u000burl = https://api.openai.com/v1\"\nurl = \"http://example.com/\"\n"
   },
   "cfg-nel": {
-   "text": "user-agent = \"x\u0085url = https://api.openai.com/v1\"\nurl = \"http://example.com/\"\n"
+   "text": "user-agent = \"xurl = https://api.openai.com/v1\"\nurl = \"http://example.com/\"\n"
   },
   "cfg-ls": {
-   "text": "user-agent = \"x\u2028url = https://api.openai.com/v1\"\nurl = \"http://example.com/\"\n"
+   "text": "user-agent = \"x url = https://api.openai.com/v1\"\nurl = \"http://example.com/\"\n"
   },
   "cfg-nested": {
    "text": "config = \"{dir}/cfg-https\"\nurl = \"http://example.com/\"\n"
@@ -127,6 +127,32 @@
   },
   "dir": {
    "dir": true
+  },
+  "cfg-exact": {
+   "repeat": "# pad\n",
+   "times": 174756,
+   "then": "url = \"https://api.openai.com/v1/exact\"\n"
+  },
+  "list-exact": {
+   "repeat": "# pad\n",
+   "times": 10917,
+   "then": "#\nhttps://api.openai.com/v1/exact\n"
+  },
+  "cfg-kstraddle": {
+   "repeat": "# pad\n",
+   "times": 174757,
+   "then": "#xx\nurl = \"https://api.openai.com/v1/straddle\"\n"
+  },
+  "list-lstraddle": {
+   "repeat": "# pad\n",
+   "times": 10918,
+   "then": "#x\nhttps://api.openai.com/v1/straddle\n"
+  },
+  "procenv-k": {
+   "procenv": "url = \"https://api.openai.com/v1/proc\""
+  },
+  "procenv-l": {
+   "procenv": "https://api.openai.com/v1/proc?x=1"
   }
  },
  "shapes": [
@@ -1629,6 +1655,38 @@
    "argv": [
     "api.openai.com/v1"
    ]
+  },
+  {
+   "id": "x175",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-exact"
+   ]
+  },
+  {
+   "id": "x176",
+   "tool": "wget",
+   "argv": [
+    "-i",
+    "{dir}/list-exact"
+   ]
+  },
+  {
+   "id": "x177",
+   "tool": "aria2c",
+   "argv": [
+    "-i",
+    "{dir}/list-exact"
+   ]
+  },
+  {
+   "id": "x178",
+   "tool": "http",
+   "argv": [
+    "-i",
+    "{dir}/list-exact"
+   ]
   }
  ],
  "special": [
@@ -2200,6 +2258,54 @@
     "api.openai.com"
    ],
    "why": "URL on the command line"
+  },
+  {
+   "id": "s048",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-kstraddle"
+   ],
+   "hosts": [
+    null
+   ],
+   "why": "a file over the cap whose last line the cap cuts: the cut line is dropped, so the host in it is not read; main's full read would find it. One call, no host"
+  },
+  {
+   "id": "s049",
+   "tool": "wget",
+   "argv": [
+    "-i",
+    "{dir}/list-lstraddle"
+   ],
+   "hosts": [
+    null
+   ],
+   "why": "a list over the cap whose last line the cap cuts: the cut line is dropped, so the host in it is not read. One call, no host"
+  },
+  {
+   "id": "s050",
+   "tool": "aria2c",
+   "argv": [
+    "-i",
+    "{dir}/list-lstraddle"
+   ],
+   "hosts": [
+    null
+   ],
+   "why": "as s049 for aria2c"
+  },
+  {
+   "id": "s051",
+   "tool": "http",
+   "argv": [
+    "-i",
+    "{dir}/list-lstraddle"
+   ],
+   "hosts": [
+    null
+   ],
+   "why": "as s049 for httpie"
   }
  ],
  "watched": "api.openai.com",
@@ -2597,7 +2703,19 @@
    "h173": [
     "api.openai.com"
    ],
-   "h174": []
+   "h174": [],
+   "x175": [
+    "api.openai.com"
+   ],
+   "x176": [
+    "api.openai.com"
+   ],
+   "x177": [
+    "api.openai.com"
+   ],
+   "x178": [
+    "api.openai.com"
+   ]
   },
   "python": {
    "c001": [
@@ -2986,7 +3104,41 @@
    "h173": [
     "api.openai.com"
    ],
-   "h174": []
+   "h174": [],
+   "x175": [
+    "api.openai.com"
+   ],
+   "x176": [
+    "api.openai.com"
+   ],
+   "x177": [
+    "api.openai.com"
+   ],
+   "x178": [
+    "api.openai.com"
+   ]
+  },
+  "node_procfs": {
+   "p001": [
+    "api.openai.com"
+   ],
+   "p002": [],
+   "p003": [],
+   "p004": []
+  },
+  "python_procfs": {
+   "p001": [
+    "api.openai.com"
+   ],
+   "p002": [
+    "api.openai.com"
+   ],
+   "p003": [
+    "api.openai.com"
+   ],
+   "p004": [
+    "api.openai.com"
+   ]
   }
  },
  "known_main_mismatch": [
@@ -2994,5 +3146,39 @@
   "c108",
   "c109",
   "c121"
+ ],
+ "procfs": [
+  {
+   "id": "p001",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/procenv-k"
+   ]
+  },
+  {
+   "id": "p002",
+   "tool": "wget",
+   "argv": [
+    "-i",
+    "{dir}/procenv-l"
+   ]
+  },
+  {
+   "id": "p003",
+   "tool": "aria2c",
+   "argv": [
+    "-i",
+    "{dir}/procenv-l"
+   ]
+  },
+  {
+   "id": "p004",
+   "tool": "http",
+   "argv": [
+    "-i",
+    "{dir}/procenv-l"
+   ]
+  }
  ]
 }

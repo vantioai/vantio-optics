@@ -99,15 +99,21 @@ test("a known-host call is still counted with its bytes, with no no-host line", 
   rmSync(root, { recursive: true, force: true });
 });
 
-test("a log from before option A prints no no-host line, as its summary counts that call", () => {
+test("a log from before option A is read as main read it, in every MCP reader", () => {
   const { root, dir } = fixtureDir({
     vantio_run_log: "1",
     trace_id: "van394mcpold",
     calls: [NO_HOST, KNOWN],
     summary: { total_calls: 2, total_bytes: 5300, hosts: ["llm.example.test", "unknown"] },
   });
+  // The same total, 2, in the list, in prove and in discover.
+  assert.equal(listRunLogs(dir)[0].total_calls, 2);
+  assert.equal(listRunLogs(dir)[0].total_bytes, 5300);
   const md = proveMarkdown(loadRun("van394mcpold", dir).log);
   assert.match(md, /- Total calls: \*\*2\*\*/);
   assert.ok(!md.includes("no known host"), md);
+  const hosts = discoverLocal(30 * 24 * 60 * 60 * 1000, dir);
+  assert.deepEqual(hosts.map((h) => [h.hostname, h.calls, h.bytes]).sort(), [["llm.example.test", 1, 300], ["unknown", 1, 5000]]);
+  assert.equal(hosts.calls_without_host, 0);
   rmSync(root, { recursive: true, force: true });
 });

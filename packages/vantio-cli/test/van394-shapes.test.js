@@ -45,10 +45,33 @@ for (const [tool, argv] of JSON.parse(process.env.VAN394_COMMANDS)) {
 process.stdout.write(JSON.stringify({ max_spawn_ms: Math.max(0, ...spans) }) + "\\n");
 `;
 
-function makeFiles(filesDir, keep) {
+const HAS_PROCFS = existsSync("/proc/self/environ");
+
+// A regular file that reports size 0 and has content: /proc/<pid>/environ of a
+// child that sleeps. Its one environment entry is the line `entry`.
+function procEnvFile(path, entry, sleepers) {
+  const eq = entry.indexOf("=");
+  const key = entry.slice(0, eq);
+  const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 120000)"], { env: { [key]: entry.slice(eq + 1) }, stdio: "ignore" });
+  sleepers.push(child);
+  const environ = `/proc/${child.pid}/environ`;
+  const until = Date.now() + 10000;
+  // Right after spawn the child may still show the parent's environment.
+  while (Date.now() < until) {
+    try {
+      if (readFileSync(environ, "utf8").startsWith(entry)) break;
+    } catch { /* not there yet */ }
+    execFileSync("sleep", ["0.05"]);
+  }
+  symlinkSync(environ, path);
+}
+
+function makeFiles(filesDir, keep, group, sleepers) {
   for (const [name, spec] of Object.entries(doc.files)) {
     const path = join(filesDir, name);
-    if (spec.fifo) execFileSync("mkfifo", [path]);
+    if (spec.procenv) {
+      if (group === "procfs") procEnvFile(path, spec.procenv, sleepers);
+    } else if (spec.fifo) execFileSync("mkfifo", [path]);
     else if (spec.dir) mkdirSync(path);
     else if (spec.symlink) symlinkSync(spec.symlink.split("{dir}").join(filesDir), path);
     else if (spec.socket) {
@@ -74,8 +97,9 @@ async function runNode(interceptorPath, group) {
     chmodSync(join(bin, tool), 0o755);
   }
   const keep = [];
+  const sleepers = [];
   try {
-    makeFiles(filesDir, keep);
+    makeFiles(filesDir, keep, group, sleepers);
     await Promise.all(keep.map((s) => new Promise((resolve) => s.once("listening", resolve))));
     const shapes = doc[group];
     const commands = shapes.map((s) => [s.tool, s.argv.map((a) => a.split("{dir}").join(filesDir))]);
@@ -115,6 +139,7 @@ async function runNode(interceptorPath, group) {
     return { hosts: Object.fromEntries(shapes.map((s, i) => [s.id, per[i]])), max_spawn_ms };
   } finally {
     for (const s of keep) s.close();
+    for (const c of sleepers) c.kill("SIGKILL");
     rmSync(work, { recursive: true, force: true });
   }
 }
@@ -145,6 +170,10 @@ if (generateFrom) {
       node: node.hosts,
       python: python.hosts,
     };
+    if (HAS_PROCFS) {
+      doc.expected_main.node_procfs = (await runNode(join(generateFrom, "packages", "vantio-cli", "bin", "interceptor.cjs"), "procfs")).hosts;
+      doc.expected_main.python_procfs = runPython(join(generateFrom, "packages", "vantio-agent-sdk-py"), "procfs").hosts;
+    }
     doc.known_main_mismatch = Object.keys(node.hosts).filter((id) => JSON.stringify(node.hosts[id]) !== JSON.stringify(python.hosts[id]));
     const text = JSON.stringify(doc, null, 1) + "\n";
     writeFileSync(FIXTURE_PATH, text);
@@ -153,7 +182,7 @@ if (generateFrom) {
 } else {
   test("the fixture has main's results and the two copies are the same file", () => {
     assert.ok(doc.expected_main && doc.expected_main.generated_from, "expected_main is missing: generate it from main");
-    assert.ok(doc.shapes.length >= 58, `only ${doc.shapes.length} shapes`);
+    assert.ok(doc.shapes.length >= 178, `only ${doc.shapes.length} shapes`);
     assert.deepEqual(Object.keys(doc.expected_main.node), doc.shapes.map((s) => s.id));
     assert.deepEqual(Object.keys(doc.expected_main.python), doc.shapes.map((s) => s.id));
     const differ = doc.shapes.map((s) => s.id).filter((id) => JSON.stringify(doc.expected_main.node[id]) !== JSON.stringify(doc.expected_main.python[id]));
@@ -170,6 +199,20 @@ if (generateFrom) {
     assert.ok(got.max_spawn_ms < 3000, `a spawn took ${got.max_spawn_ms} ms`);
   });
 
+  test("Node reads a regular file that reports size 0 (procfs): as main's Python reads it, and as main's Node reads a curl config", { skip: HAS_PROCFS ? false : "no /proc here", timeout: 100000 }, async () => {
+    const got = await runNode(INTERCEPTOR_PATH, "procfs");
+    const ids = doc.procfs.map((s) => s.id);
+    assert.deepEqual(Object.keys(doc.expected_main.node_procfs), ids);
+    assert.deepEqual(Object.keys(doc.expected_main.python_procfs), ids);
+    // Main's Python reads every one of these files and finds the URL.
+    for (const id of ids) assert.deepEqual(doc.expected_main.python_procfs[id], ["api.openai.com"], `main's Python result for ${id}`);
+    assert.deepEqual(got.hosts, doc.expected_main.python_procfs);
+    // Main's Node read a size-0 curl config (p001) but sized the buffer of a -i list from fstat, so it read
+    // nothing from a size-0 list (p002 to p004). That is a main difference between Node and Python, now closed.
+    assert.deepEqual(got.hosts.p001, doc.expected_main.node_procfs.p001);
+    for (const id of ["p002", "p003", "p004"]) assert.deepEqual(doc.expected_main.node_procfs[id], [], `main's Node result for ${id}`);
+  });
+
   test("Node on FIFO, link to FIFO, socket, directory, /dev/stdin, /dev/null and oversize files: no hang, no-host call where the rule says", { timeout: 200000 }, async () => {
     const got = await runNode(INTERCEPTOR_PATH, "special");
     const wrong = doc.special
@@ -181,13 +224,15 @@ if (generateFrom) {
 
   test("Node and Python record the same hosts on every shape, except where main's own Node and Python differ", { skip: HAS_PYTHON ? false : "python3 or the Python package is not here", timeout: 400000 }, async () => {
     const mismatch = new Set(doc.known_main_mismatch);
-    for (const group of ["shapes", "special"]) {
+    for (const group of HAS_PROCFS ? ["shapes", "special", "procfs"] : ["shapes", "special"]) {
       const node = await runNode(INTERCEPTOR_PATH, group);
       const py = runPython(PY_SDK_DIR, group);
       const wrong = [];
       for (const s of doc[group]) {
         const want = group === "shapes" ? doc.expected_main[mismatch.has(s.id) ? "python" : "node"][s.id] : (s.hosts_python || s.hosts);
-        if (group === "shapes" && mismatch.has(s.id)) {
+        if (group === "procfs") {
+          if (JSON.stringify(node.hosts[s.id]) !== JSON.stringify(py.hosts[s.id])) wrong.push(`${s.id}: Node ${JSON.stringify(node.hosts[s.id])}, Python ${JSON.stringify(py.hosts[s.id])}`);
+        } else if (group === "shapes" && mismatch.has(s.id)) {
           // Same as main, each in its own runtime.
           if (JSON.stringify(py.hosts[s.id]) !== JSON.stringify(want)) wrong.push(`${s.id}: Python ${JSON.stringify(py.hosts[s.id])}, main ${JSON.stringify(want)}`);
         } else if (group === "special" && s.hosts_python) {

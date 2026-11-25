@@ -98,6 +98,21 @@ function countedCalls(calls) {
   return (Array.isArray(calls) ? calls : []).filter((call) => call && call.hostname);
 }
 
+// A log written before option A has no `calls_without_host` in its summary.
+// Every reader reads such a log as main read it: every call counts, and no
+// no-host count or line is shown (VAN-394).
+function hasNoHostField(log) {
+  const summary = log && log.summary;
+  return !!summary && typeof summary.calls_without_host === "number";
+}
+
+// The calls of one run log that count. For a log from before option A that is
+// every call.
+function logCountedCalls(log) {
+  const calls = Array.isArray(log && log.calls) ? log.calls : [];
+  return hasNoHostField(log) ? countedCalls(calls) : calls;
+}
+
 function rollupCalls(calls) {
   const list = Array.isArray(calls) ? calls : [];
   if (list.length === 0) {
@@ -132,6 +147,8 @@ module.exports = {
   opticsStatusForRecordedCall,
   displayCall,
   countedCalls,
+  hasNoHostField,
+  logCountedCalls,
   rollupCalls,
   telemetryPosture,
   withSchema,

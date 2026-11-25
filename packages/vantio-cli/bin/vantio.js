@@ -15,7 +15,8 @@ const {
   PROVIDER_SDKS,
   humanStatus,
   displayCall,
-  countedCalls,
+  hasNoHostField,
+  logCountedCalls,
   rollupCalls,
   telemetryPosture,
   withSchema,
@@ -512,18 +513,12 @@ function noHostNote(noHost) {
   return `Calls with no known host: ${noHost} (listed above, not counted in the summary)`;
 }
 
-// A log written before option A has no `calls_without_host`, and its summary
-// counts a call with no known host. The note "not counted in the summary"
-// would be untrue for it, so it is printed only for a log that has the field.
-function noHostCount(log, calls, counted) {
-  const field = log && log.summary ? log.summary.calls_without_host : undefined;
-  return typeof field === "number" ? calls.length - counted.length : 0;
-}
-
+// A log from before option A is read as main read it: every call counts, so
+// there is no no-host line (see logCountedCalls in optics-cx.cjs).
 function generateHtmlReport(log) {
   const calls      = Array.isArray(log.calls) ? log.calls : [];
-  const counted    = countedCalls(calls);
-  const noHost     = noHostCount(log, calls, counted);
+  const counted    = logCountedCalls(log);
+  const noHost     = calls.length - counted.length;
   const summary    = log.summary || {};
   const totalCalls = summary.total_calls ?? counted.length;
   const totalBytes = summary.total_bytes ?? counted.reduce((a, c) => a + (c.bytes || 0), 0);
@@ -640,7 +635,7 @@ ${rows}
 
 function proofJson(log) {
   const calls = Array.isArray(log.calls) ? log.calls : [];
-  const counted = countedCalls(calls);
+  const counted = logCountedCalls(log);
   const rollup = rollupCalls(counted);
   return withSchema({
     command: "prove",
@@ -655,8 +650,8 @@ function proofJson(log) {
     summary: {
       total_calls: log.summary?.total_calls ?? counted.length,
       total_bytes: log.summary?.total_bytes ?? counted.reduce((a, c) => a + (c.bytes || 0), 0),
-      // Left out for a log written before option A (see noHostCount).
-      ...(typeof log.summary?.calls_without_host === "number" ? { calls_without_host: calls.length - counted.length } : {}),
+      // Left out for a log written before option A.
+      ...(hasNoHostField(log) ? { calls_without_host: calls.length - counted.length } : {}),
       opticsStatus: rollup.opticsStatus,
       applicationStatus: rollup.applicationStatus,
     },
@@ -681,8 +676,8 @@ function publicCall(call) {
 
 function generateMarkdownReport(log) {
   const calls      = Array.isArray(log.calls) ? log.calls : [];
-  const counted    = countedCalls(calls);
-  const noHost     = noHostCount(log, calls, counted);
+  const counted    = logCountedCalls(log);
+  const noHost     = calls.length - counted.length;
   const summary    = log.summary || {};
   const totalCalls = summary.total_calls ?? counted.length;
   const totalBytes = summary.total_bytes ?? counted.reduce((a, c) => a + (c.bytes || 0), 0);
@@ -783,7 +778,7 @@ function listRuns(dir) {
   const div = "-".repeat(hdr.length);
   process.stdout.write(`${div}\n${hdr}\n${div}\n`);
   for (const { log } of entries) {
-    const calls = log.summary?.total_calls ?? (Array.isArray(log.calls) ? countedCalls(log.calls).length : "—");
+    const calls = log.summary?.total_calls ?? (Array.isArray(log.calls) ? logCountedCalls(log).length : "—");
     const bytes = log.summary?.total_bytes;
     const date  = log.generated_at
       ? new Date(log.generated_at).toISOString().replace("T", " ").slice(0, 19) + " UTC"
@@ -984,12 +979,15 @@ function discoverLocalCommand(since, hostFilter, asJson) {
       if (log?.vantio_run_log !== "1" || !Array.isArray(log.calls)) continue;
       scannedRuns++;
       const ts = log.generated_at ? new Date(log.generated_at).getTime() : 0;
+      // A log from before option A is read as main read it: a call with no
+      // host is a row named `unknown`, and there is no no-host count.
+      const optionA = hasNoHostField(log);
       for (const call of log.calls) {
-        if (!call.hostname) {
+        if (!call.hostname && optionA) {
           if (!hostNeedle) noHostCalls++;
           continue;
         }
-        const h = call.hostname;
+        const h = call.hostname || "unknown";
         if (hostNeedle && !h.toLowerCase().includes(hostNeedle)) continue;
         const rec = hostMap.get(h) || { host: h, total: 0, bytes: 0, last_seen: null };
         rec.total++;
@@ -1234,9 +1232,13 @@ async function searchCommand(args) {
   const providerF = (values.provider || "").toLowerCase();
   const actionF = (values.action || "").toLowerCase();
   const hits = [];
+  // The hits that count (VAN-394). A call with no known host is listed, but
+  // it does not count, except in a log from before option A.
+  const countedHits = [];
 
   for (const { log } of entries) {
     const calls = Array.isArray(log.calls) ? log.calls : [];
+    const optionA = hasNoHostField(log);
     for (let i = 0; i < calls.length; i++) {
       const call = calls[i];
       if (hostF && !(call.hostname || "").toLowerCase().includes(hostF)) continue;
@@ -1247,6 +1249,7 @@ async function searchCommand(args) {
         trace_id: log.trace_id || null,
         index: i + 1,
       }, publicCall(call)));
+      if (call.hostname || !optionA) countedHits.push(hits[hits.length - 1]);
     }
   }
 
@@ -1257,8 +1260,8 @@ async function searchCommand(args) {
       matches: hits.length,
       // A hit with no known host is listed, but it is not counted for the
       // status (VAN-394), as in prove and discover.
-      opticsStatus: countedCalls(hits).length ? "SUCCESS" : "NOT_OBSERVED",
-      applicationStatus: rollupCalls(countedCalls(hits).map((hit) => ({ status: hit.httpStatus }))).applicationStatus,
+      opticsStatus: countedHits.length ? "SUCCESS" : "NOT_OBSERVED",
+      applicationStatus: rollupCalls(countedHits.map((hit) => ({ status: hit.httpStatus }))).applicationStatus,
       calls: hits,
     }), null, 2) + "\n");
     return;
@@ -1283,6 +1286,8 @@ function readCallsFromLog(log) {
 
 function printTailCalls(log, lines, asJson, showAll) {
   const calls = readCallsFromLog(log);
+  const counted = logCountedCalls(log);
+  const noHost = calls.length - counted.length;
   const slice = showAll ? calls : (lines === 0 ? [] : calls.slice(-lines));
   if (asJson) {
     const shown = slice.map((call) => publicCall(call));
@@ -1291,16 +1296,20 @@ function printTailCalls(log, lines, asJson, showAll) {
       trace_id: log.trace_id || null,
       // Same counting rule as prove and discover (VAN-394): a call with no
       // known host is listed in `calls`, but it is not counted here.
-      total_calls: countedCalls(calls).length,
+      total_calls: counted.length,
+      ...(hasNoHostField(log) ? { calls_without_host: noHost } : {}),
       shown: shown.length,
-      opticsStatus: rollupCalls(countedCalls(slice)).opticsStatus,
-      applicationStatus: rollupCalls(countedCalls(slice)).applicationStatus,
+      // From the whole run's counted calls, not from the rows shown, so that
+      // `-n 1` says what prove, search and the run summary say.
+      opticsStatus: rollupCalls(counted).opticsStatus,
+      applicationStatus: rollupCalls(counted).applicationStatus,
       calls: shown,
     }), null, 2) + "\n");
     return shown.length;
   }
   process.stdout.write(
-    `\nTail — trace ${log.trace_id || "—"} · showing ${slice.length} of ${calls.length} call(s)\n\n`
+    `\nTail — trace ${log.trace_id || "—"} · showing ${slice.length} of ${calls.length} call(s)` +
+    (noHost > 0 ? ` (${counted.length} counted, ${noHost} with no known host)` : "") + "\n\n"
   );
   if (slice.length === 0) {
     if (calls.length === 0) process.stdout.write("No calls recorded in this run log.\n");
@@ -1427,9 +1436,10 @@ function hostRollup(log) {
   }
   const out = {};
   // No by_host (a Python run log): count from the calls. A call with no known
-  // host is left out, as in the run summary (VAN-394).
-  for (const call of countedCalls(readCallsFromLog(log))) {
-    const h = call.hostname;
+  // host is left out, as in the run summary (VAN-394). A log from before
+  // option A is read as main read it: such a call is a host named `unknown`.
+  for (const call of logCountedCalls(log)) {
+    const h = call.hostname || "unknown";
     out[h] = out[h] || { calls: 0, bytes: 0 };
     out[h].calls += 1;
     out[h].bytes += call.bytes || 0;
@@ -1438,7 +1448,7 @@ function hostRollup(log) {
 }
 
 function runTotals(log) {
-  const calls = countedCalls(readCallsFromLog(log));
+  const calls = logCountedCalls(log);
   return {
     trace_id: log.trace_id || null,
     started_at: log.started_at || null,

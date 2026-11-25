@@ -440,6 +440,7 @@ function discoverLocal(calls, extraArgs) {
     trace_id: "van394discover",
     generated_at: new Date().toISOString(),
     calls,
+    summary: optionASummary(calls),
   }));
   const run = spawnSync(process.execPath, [CLI_PATH, "discover", "--local", ...extraArgs], {
     env: { PATH: process.env.PATH, HOME: home },
@@ -448,6 +449,13 @@ function discoverLocal(calls, extraArgs) {
   });
   assert.equal(run.status, 0, run.stderr);
   return run.stdout;
+}
+
+// A log written under option A has `calls_without_host` in its summary. A log
+// without a summary here is made like that, so the readers treat it as new.
+function optionASummary(calls) {
+  const counted = calls.filter((c) => c && c.hostname);
+  return { total_calls: counted.length, calls_without_host: calls.length - counted.length };
 }
 
 const NO_HOST_CALL = { hostname: null, provider: "unknown", bytes: 5000, action: "OBSERVED", mediation: "node_curl" };
@@ -510,10 +518,11 @@ function cliWithLogs(logs) {
       vantio_run_log: "1",
       generated_at: new Date().toISOString(),
       started_at: new Date().toISOString(),
+      ...(log.summary === undefined ? { summary: optionASummary(log.calls || []) } : {}),
       ...log,
     }));
   }
-  return (args) => {
+  const cli = (args) => {
     const run = spawnSync(process.execPath, [CLI_PATH, ...args], {
       env: { PATH: process.env.PATH, HOME: home },
       encoding: "utf8",
@@ -522,6 +531,8 @@ function cliWithLogs(logs) {
     assert.equal(run.status, 0, run.stderr);
     return run.stdout;
   };
+  cli.home = home;
+  return cli;
 }
 
 // A Node run log written under option A, and a Python one (no by_host).
@@ -576,8 +587,8 @@ test("vantio prove: a log with only known-host calls has no no-host line", { tim
 test("vantio diff: a Python run log with a no-host call adds no `unknown` host", { timeout: 40000 }, () => {
   // Python run logs have no by_host and no total_bytes.
   const cli = cliWithLogs([
-    { trace_id: "van394pya", runtime: "python", calls: [KNOWN_HOST_CALL], summary: { hosts: ["llm.example.test"] } },
-    { trace_id: "van394pyb", runtime: "python", calls: [KNOWN_HOST_CALL, NO_HOST_CALL], summary: { hosts: ["llm.example.test"] } },
+    { trace_id: "van394pya", runtime: "python", calls: [KNOWN_HOST_CALL], summary: { hosts: ["llm.example.test"], calls_without_host: 0 } },
+    { trace_id: "van394pyb", runtime: "python", calls: [KNOWN_HOST_CALL, NO_HOST_CALL], summary: { hosts: ["llm.example.test"], calls_without_host: 1 } },
   ]);
   const json = JSON.parse(cli(["diff", "van394pya", "van394pyb", "--json"]));
   const text = JSON.stringify(json);
@@ -687,4 +698,225 @@ test("vantio export --jsonl: the no-host call is marked, a known call is not", {
   assert.equal(events.length, 2);
   assert.deepEqual(events.filter((e) => e.no_host === true).map((e) => e.destination), ["unknown"]);
   assert.ok(events.filter((e) => e.destination === "llm.example.test").every((e) => !("no_host" in e)));
+});
+
+// ── Round 6 ──
+
+// One rule for a log from before option A: it is read as main read it. Every
+// call counts, and no reader shows a no-host count, line or marker. All the
+// readers give the same total for the same log.
+test("a log from before option A: every reader gives the same total and shows no no-host count", { timeout: 60000 }, () => {
+  const cli = cliWithLogs([{ ...OLD_LOG, trace_id: "van394oldall", program: "agent.js" }]);
+  const run = "--run=van394oldall";
+  assert.match(cli(["prove", run, "--format=md"]), /\| Total calls \| \*\*2\*\* \|/);
+  assert.equal(JSON.parse(cli(["prove", run, "--json"])).summary.total_calls, 2);
+  assert.match(cli(["prove", "--list"]), /^van394oldall +2 +/m);
+  const tail = JSON.parse(cli(["tail", run, "--json", "--all"]));
+  assert.equal(tail.total_calls, 2);
+  assert.equal(tail.opticsStatus, "SUCCESS");
+  assert.ok(!("calls_without_host" in tail));
+  const discover = JSON.parse(cli(["discover", "--local", "--json"]));
+  assert.deepEqual(discover.hosts.map((h) => [h.host, h.total]).sort(), [["llm.example.test", 1], ["unknown", 1]]);
+  assert.equal(discover.calls_without_host, 0);
+  const discoverText = cli(["discover", "--local"]);
+  assert.match(discoverText, /2 host\(s\) {2}\| {2}2 total call\(s\)/);
+  assert.ok(!discoverText.includes("no known host"), discoverText);
+  const coverage = JSON.parse(cli(["coverage", "--json"]));
+  // Other connections of this machine may be listed too, so count this log's.
+  assert.equal(coverage.connections.filter((c) => c.trace_id === "van394oldall").length, 2);
+  assert.equal(coverage.counts.connections, coverage.connections.length, "every connection is counted");
+  assert.equal(coverage.counts.calls_without_host, 0);
+  assert.ok(coverage.connections.every((c) => !("no_host" in c)));
+  const coverageText = cli(["coverage"]);
+  assert.match(coverageText, new RegExp(`Connections seen: ${coverage.connections.length}\\n`));
+  assert.ok(!coverageText.includes("no known host"));
+  const events = cli(["export", "--jsonl=-"]).split("\n").filter((l) => l.startsWith("{")).map((l) => JSON.parse(l))
+    .filter((e) => e.kind === "observation");
+  assert.equal(events.length, 2);
+  assert.ok(events.every((e) => !("no_host" in e)));
+  assert.equal(JSON.parse(cli(["search", run, "--json"])).opticsStatus, "SUCCESS");
+});
+
+test("a log from after option A, with the same calls: the readers count one call and show the no-host count", { timeout: 60000 }, () => {
+  const cli = cliWithLogs([{ ...MIXED_NODE_LOG, trace_id: "van394newall", program: "agent.js" }]);
+  assert.equal(JSON.parse(cli(["prove", "--run=van394newall", "--json"])).summary.total_calls, 1);
+  assert.equal(JSON.parse(cli(["tail", "--run=van394newall", "--json", "--all"])).total_calls, 1);
+  const coverage = JSON.parse(cli(["coverage", "--json"]));
+  assert.equal(coverage.counts.connections, coverage.connections.length - 1, "the no-host call is not counted");
+  assert.equal(JSON.parse(cli(["discover", "--local", "--json"])).hosts.length, 1);
+});
+
+// tail: the status and the totals come from the whole run, and text and JSON agree.
+test("vantio tail -n 1 on a mixed run: the status is the run's, not the shown row's", { timeout: 40000 }, () => {
+  const cli = cliWithLogs([MIXED_NODE_LOG, { trace_id: "van394tailonly2", calls: [NO_HOST_CALL], summary: { total_calls: 0, calls_without_host: 1, hosts: [] } }]);
+  // The last row of MIXED_NODE_LOG is the known call; reverse it so the last row is the no-host call.
+  const reversed = cliWithLogs([{ ...MIXED_NODE_LOG, trace_id: "van394rev", calls: [KNOWN_HOST_CALL, NO_HOST_CALL] }]);
+  const last = JSON.parse(reversed(["tail", "--run=van394rev", "--json", "-n", "1"]));
+  assert.equal(last.shown, 1);
+  assert.equal(last.total_calls, 1);
+  assert.equal(last.opticsStatus, "SUCCESS", "the shown row has no host, but the run has a counted call");
+  assert.equal(JSON.parse(reversed(["prove", "--run=van394rev", "--json"])).opticsStatus, "SUCCESS");
+  assert.equal(JSON.parse(reversed(["search", "--run=van394rev", "--json"])).opticsStatus, "SUCCESS");
+  const only = JSON.parse(cli(["tail", "--run=van394tailonly2", "--json", "-n", "1"]));
+  assert.equal(only.opticsStatus, "NOT_OBSERVED");
+});
+
+test("vantio tail: the text says what the JSON says for a no-host-only run", { timeout: 40000 }, () => {
+  const cli = cliWithLogs([{ trace_id: "van394text", calls: [NO_HOST_CALL], summary: { total_calls: 0, calls_without_host: 1, hosts: [] } }]);
+  const json = JSON.parse(cli(["tail", "--run=van394text", "--json"]));
+  assert.equal(json.total_calls, 0);
+  assert.equal(json.calls_without_host, 1);
+  assert.equal(json.shown, 1);
+  const text = cli(["tail", "--run=van394text"]);
+  assert.match(text, /showing 1 of 1 call\(s\) \(0 counted, 1 with no known host\)/);
+  const known = cliWithLogs([KNOWN_NODE_LOG]);
+  assert.match(known(["tail", "--run=van394known"]), /showing 1 of 1 call\(s\)\n/);
+});
+
+// coverage: counts.connections leaves the no-host call out.
+test("vantio coverage: counts.connections and the text leave the no-host call out", { timeout: 40000 }, () => {
+  const cli = cliWithLogs([{ trace_id: "van394covn", program: "agent.js", calls: [NO_HOST_CALL, KNOWN_HOST_CALL], summary: { total_calls: 1, calls_without_host: 1, hosts: ["llm.example.test"] } }]);
+  const json = JSON.parse(cli(["coverage", "--json"]));
+  const mine = json.connections.filter((c) => c.trace_id === "van394covn");
+  assert.equal(mine.length, 2);
+  assert.equal(mine.filter((c) => c.no_host === true).length, 1);
+  // Other connections of this machine may be listed too. The no-host call is the only one not counted.
+  assert.equal(json.counts.connections, json.connections.length - 1);
+  assert.equal(json.counts.calls_without_host, 1);
+  assert.match(cli(["coverage"]), new RegExp(`Connections seen: ${json.counts.connections}\n`));
+});
+
+// OTLP: a no-host call is kept as a span and a log record, marked `vantio.no_host`
+// with no `server.address`, and it is left out of the byte metric.
+async function otlpPayloads(logs) {
+  const cli = cliWithLogs(logs);
+  const got = {};
+  const server = createServer((req, res) => {
+    const chunks = [];
+    req.on("data", (c) => chunks.push(c));
+    req.on("end", () => {
+      got[req.url] = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      res.end("{}");
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const child = spawn(process.execPath, [CLI_PATH, "export", `--otlp=http://127.0.0.1:${server.address().port}`], {
+      env: { PATH: process.env.PATH, HOME: cli.home },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stderr = "";
+    child.stderr.on("data", (c) => (stderr += c));
+    const code = await new Promise((resolve) => {
+      const killer = setTimeout(() => child.kill("SIGKILL"), 15000);
+      child.on("close", (c) => { clearTimeout(killer); resolve(c); });
+    });
+    assert.equal(code, 0, stderr);
+  } finally {
+    server.close();
+  }
+  const attr = (list, key) => (list || []).find((a) => a.key === key);
+  const spans = got["/v1/traces"].resourceSpans[0].scopeSpans[0].spans;
+  const records = got["/v1/logs"].resourceLogs[0].scopeLogs[0].logRecords;
+  const points = got["/v1/metrics"].resourceMetrics[0].scopeMetrics[0].metrics[0].gauge.dataPoints;
+  return { spans, records, points, attr, raw: JSON.stringify(got) };
+}
+
+test("OTLP export: a no-host-only run has a marked span and log record, and no byte metric", { timeout: 60000 }, async () => {
+  const { spans, records, points, attr, raw } = await otlpPayloads([{ trace_id: "van394otlpo", program: "agent.js", calls: [NO_HOST_CALL] }]);
+  assert.equal(spans.length, 1);
+  assert.equal(attr(spans[0].attributes, "server.address"), undefined);
+  assert.deepEqual(attr(spans[0].attributes, "vantio.no_host").value, { boolValue: true });
+  assert.equal(records.length, 1);
+  assert.equal(attr(records[0].attributes, "server.address"), undefined);
+  assert.deepEqual(points, []);
+  assert.ok(!raw.includes('{"key":"server.address","value":{"stringValue":"unknown"}}'), raw);
+});
+
+test("OTLP export: a known-host run is unchanged", { timeout: 60000 }, async () => {
+  const { spans, points, attr } = await otlpPayloads([{ trace_id: "van394otlpk", program: "agent.js", calls: [KNOWN_HOST_CALL] }]);
+  assert.equal(spans.length, 1);
+  assert.equal(attr(spans[0].attributes, "server.address").value.stringValue, "llm.example.test");
+  assert.equal(attr(spans[0].attributes, "vantio.no_host"), undefined);
+  assert.deepEqual(points.map((p) => [attr(p.attributes, "server.address").value.stringValue, p.asInt]), [["llm.example.test", "300"]]);
+});
+
+test("OTLP export: in a mixed run the no-host call is in no host row and no byte total", { timeout: 60000 }, async () => {
+  const { spans, records, points, attr, raw } = await otlpPayloads([{ trace_id: "van394otlpm", program: "agent.js", calls: [NO_HOST_CALL, KNOWN_HOST_CALL] }]);
+  assert.equal(spans.length, 2);
+  // The known host also gets its own "New destination" record. The no-host call gets exactly one record, with no host.
+  assert.equal(records.filter((r) => attr(r.attributes, "vantio.no_host")).length, 1);
+  assert.ok(records.filter((r) => !attr(r.attributes, "server.address")).every((r) => attr(r.attributes, "vantio.no_host")));
+  assert.equal(spans.filter((sp) => attr(sp.attributes, "vantio.no_host")).length, 1);
+  assert.deepEqual(points.map((p) => [attr(p.attributes, "server.address").value.stringValue, p.asInt]), [["llm.example.test", "300"]]);
+  assert.ok(!raw.includes('{"key":"server.address","value":{"stringValue":"unknown"}}'), raw);
+});
+
+// The second check after the open (fstat) and the non-blocking open. The test
+// makes stat say "regular file" for a FIFO, as if the path were swapped after
+// the stat. The FIFO has no reader of its own and a writer holds data: if the
+// wrapper read it, the host in the data would be recorded. If the open were
+// blocking, the agent would hang and be killed by the timeout below.
+const SWAP_SCRIPT = `
+const fs = require("node:fs");
+const realStat = fs.statSync;
+fs.statSync = (p, ...a) => (String(p) === process.env.FIFO ? realStat(process.env.REGULAR, ...a) : realStat(p, ...a));
+require(process.env.INTERCEPTOR);
+const { spawn } = require("node:child_process");
+// A writer, opened non-blocking, puts the config in the FIFO once the wrapper has its fd.
+const child = spawn("curl", ["-K", process.env.FIFO], { stdio: "ignore" });
+child.on("exit", (code) => process.stdout.write(JSON.stringify({ code }) + "\\n"));
+`;
+
+async function swapRun(withWriter) {
+  const work = mkdtempSync(join(tmpdir(), "van394-swap-"));
+  const home = join(work, "home");
+  mkdirSync(home);
+  const fifo = join(work, "cfg");
+  execFileSync("mkfifo", [fifo]);
+  const regular = regularFile('url = "https://llm.example.test/v1/x"\n');
+  // A stand-in curl that exits at once and never opens the path, so only the wrapper could read it.
+  const bin = mkdtempSync(join(tmpdir(), "van394-bin-"));
+  writeFileSync(join(bin, "curl"), "#!/bin/sh\nexit 0\n");
+  chmodSync(join(bin, "curl"), 0o755);
+  // A holder keeps the FIFO open for writing with the config in it, so a read would see the URL.
+  // Without the holder the FIFO has no writer: a blocking open of it would wait for ever.
+  const holder = withWriter
+    ? spawn("sh", ["-c", 'exec 3<>"$FIFO"; printf "%s" "$CONTENT" >&3; sleep 8'], {
+      env: { FIFO: fifo, CONTENT: 'url = "https://llm.example.test/v1/x"\n' },
+      stdio: "ignore",
+    })
+    : null;
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  try {
+    const out = await new Promise((resolve) => {
+      const child = spawn(process.execPath, ["-e", SWAP_SCRIPT], {
+        env: {
+          PATH: `${bin}:${process.env.PATH}`, HOME: home, VANTIO_HOME: home, VANTIO_TRACE_ID: "van394swap",
+          VANTIO_EXTRA_LLM_HOSTS: "llm.example.test", VAN394_OUT: join(work, "out"), FIFO: fifo, REGULAR: regular,
+          INTERCEPTOR: INTERCEPTOR_PATH,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let stderr = "";
+      child.stderr.on("data", (c) => (stderr += c));
+      const killer = setTimeout(() => child.kill("SIGKILL"), 6000);
+      child.on("close", (code, signal) => { clearTimeout(killer); resolve({ code, signal, stderr }); });
+    });
+    assert.equal(out.signal, null, `the agent hung: a blocking open? ${out.stderr}`);
+    assert.equal(out.code, 0, out.stderr);
+    const { log } = readRun(home, "van394swap");
+    assert.deepEqual(log.calls.map((c) => c.hostname), [null], "the FIFO was not read: the call has no host");
+  } finally {
+    if (holder) holder.kill("SIGKILL");
+    releaseFifo(fifo);
+  }
+}
+
+test("a path swapped to a FIFO after the stat, with a writer: closed without a read (the fstat check)", { timeout: 30000 }, async () => {
+  await swapRun(true);
+});
+
+test("a path swapped to a FIFO after the stat, with no writer: no blocking open (O_NONBLOCK)", { timeout: 30000 }, async () => {
+  await swapRun(false);
 });

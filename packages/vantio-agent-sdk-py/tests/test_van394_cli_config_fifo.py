@@ -54,8 +54,49 @@ class ReadRegularFileTests(unittest.TestCase):
     def test_the_cap_is_kept(self) -> None:
         path = os.path.join(self.dir, "big")
         with open(path, "wb") as fh:
+            fh.write(b"line one\n" * 20)
+        skipped: list = []
+        # 9 bytes a line, cap 100: 11 whole lines fit, and the 12th is cut.
+        self.assertEqual(_read_regular_file(path, 100, skipped), b"line one\n" * 11)
+        self.assertEqual(skipped, [path])
+        # No newline at all within the cap: nothing is returned.
+        with open(path, "wb") as fh:
             fh.write(b"x" * 5000)
-        self.assertEqual(len(_read_regular_file(path, 100) or b""), 100)
+        self.assertEqual(_read_regular_file(path, 100), b"")
+
+    def test_a_file_of_exactly_the_cap_is_read_in_full(self) -> None:
+        path = os.path.join(self.dir, "exact")
+        body = b"#" * 90 + b"\nurl = https://a.example.test\n"
+        with open(path, "wb") as fh:
+            fh.write(body)
+        skipped: list = []
+        self.assertEqual(_read_regular_file(path, len(body), skipped), body)
+        self.assertEqual(skipped, [])
+        # One byte over, and the byte after the cap is the newline: the last
+        # line is complete and is kept.
+        with open(path, "wb") as fh:
+            fh.write(body + b"more\n")
+        skipped = []
+        self.assertEqual(_read_regular_file(path, len(body) - 1, skipped), body[:-1])
+        self.assertEqual(skipped, [path])
+
+    def test_a_line_cut_by_the_cap_is_not_parsed(self) -> None:
+        url = b"url = https://api.openai.com"
+        path = os.path.join(self.dir, "straddle")
+        with open(path, "wb") as fh:
+            fh.write(b"#" * 40 + b"\n" + url + b".evil.example.test/x\n")
+        cap = 41 + len(url)
+        skipped: list = []
+        raw = _read_regular_file(path, cap, skipped)
+        self.assertEqual(raw, b"#" * 40 + b"\n")
+        self.assertEqual(skipped, [path])
+
+    def test_a_regular_file_that_reports_size_zero_is_read(self) -> None:
+        if not os.path.exists("/proc/self/environ"):
+            self.skipTest("no procfs")
+        data = _read_regular_file("/proc/self/cmdline", 4096)
+        self.assertTrue(data)
+        self.assertEqual(os.stat("/proc/self/cmdline").st_size, 0)
 
     def _opened_paths(self, call) -> list:
         opened: list = []
@@ -125,11 +166,33 @@ class ReadRegularFileTests(unittest.TestCase):
         fifo = os.path.join(self.dir, "fifo")
         os.mkfifo(fifo)
         real_stat = os.stat
+        result: dict = {}
+
+        def attempt() -> None:
+            try:
+                result["value"] = _read_regular_file(fifo, 1024)
+            except BaseException as exc:  # noqa: BLE001
+                result["error"] = exc
+
+        # The call runs in a thread with a bound. Without O_NONBLOCK the open
+        # of a FIFO with no writer would block for good; the test must fail
+        # by assertion then, not hang the suite.
         with mock.patch.object(_http_observe.os, "stat", lambda p, *a, **k: real_stat(regular)), \
                 mock.patch.object(_http_observe.os, "read", side_effect=AssertionError("read was called")):
-            t0 = time.monotonic()
-            self.assertIsNone(_read_regular_file(fifo, 1024))
-        self.assertLess(time.monotonic() - t0, 1.0)
+            worker = threading.Thread(target=attempt, daemon=True)
+            worker.start()
+            worker.join(5)
+            if worker.is_alive():
+                # Let the blocked open go, then fail.
+                try:
+                    fd = os.open(fifo, os.O_WRONLY | os.O_NONBLOCK)
+                    os.close(fd)
+                except OSError:
+                    pass
+                worker.join(2)
+                self.fail("the open of a FIFO blocked: O_NONBLOCK is missing")
+        self.assertNotIn("error", result, result.get("error"))
+        self.assertIsNone(result["value"])
 
     def test_a_curl_config_is_read_up_to_1_mib(self) -> None:
         pad = b"# pad\n"

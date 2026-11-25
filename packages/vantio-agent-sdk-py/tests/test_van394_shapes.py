@@ -73,6 +73,16 @@ class ShapeTests(unittest.TestCase):
         self.assertEqual(wrong, [])
         self.assertLess(got["max_spawn_ms"], 3000)
 
+    @unittest.skipUnless(os.path.exists("/proc/self/environ"), "no /proc here")
+    def test_a_regular_file_that_reports_size_zero_is_read_as_main_reads_it(self) -> None:
+        # /proc/<pid>/environ of a sleeping child: a regular file, size 0, with content.
+        got = _run("procfs")
+        main = self.doc["expected_main"]["python_procfs"]
+        self.assertEqual(list(main), [s["id"] for s in self.doc["procfs"]])
+        for host in main.values():
+            self.assertIn("api.openai.com", host)
+        self.assertEqual(got["hosts"], main)
+
     def test_python_agrees_with_node_where_main_does(self) -> None:
         # Node's results are the Node side of expected_main and the `hosts` of
         # each special shape (checked by the Node test). Here: Python equals
