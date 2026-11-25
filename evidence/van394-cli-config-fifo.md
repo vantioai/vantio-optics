@@ -113,8 +113,84 @@ Python, `packages/vantio-agent-sdk-py/tests/test_van394_cli_config_fifo.py` (20 
 
 - Limits: a URL after the first 1 MiB of a curl `-K` config, or after the first 64 KiB of a wget / httpie / aria2c `-i` list, is not recorded.
 - Between the `stat` and the open, a path can still be swapped for a FIFO with a waiting writer. The `fstat` check then stops the read, but that open has already let the writer through. Python has a test for the second check (with `os.stat` patched); Node has none, because the helper is not exported.
-- The no-host call is recorded without a scope check, since the host is unknown. It is recorded even if the skipped file turns out to hold no URL or a host that is not watched. Policy question for the owners: keep that, or record nothing.
+- The no-host call is recorded without a scope check, since the host is unknown. It is recorded even if the skipped file turns out to hold no URL or a host that is not watched. This was a policy question for the owners. It is answered in the next section (owner decision: option A).
 - `curl -K -` and `wget -i -` with stdin as a pipe are unchanged: not recorded.
 - The writer-first and `/dev/stdin` tests use a stand-in `curl` / `wget`. Real curl and wget are covered only by the two late-writer tests.
 - Linux only. Not run: macOS, Windows, the drift check, `ws11/verify.mjs`.
+- GitHub CI did not run (billing lock, VAN-129).
+
+## 2026-11-25: owner decision, option A
+
+The policy question from the section above is answered. Owner decision: option A. A call with no known host is still recorded, but it is left out of the LLM call count and the byte totals. The decision is on VAN-394 as a relayed comment; the owner has not yet confirmed it there.
+
+One commit on top of `820cf0f`.
+
+### Before (confirmed on `820cf0f`)
+
+Stand-in `curl` on `PATH`, `curl -K /dev/null -d <5,000 bytes>`:
+
+- Node: the run summary printed `LLM calls: 1`, `Hosts: unknown`, `Total bytes: 5,000`. The run file had `total_calls: 1`, `total_bytes: 5000` and an `unknown` row in `by_host` and `by_provider`.
+- Python: the run file had `total_calls: 1` and `hosts: ["unknown"]`.
+
+### What changed
+
+- Node, `bin/interceptor.cjs`: the record stays in `calls` with its own size. `summary.total_calls`, `total_bytes`, `hosts`, `providers`, `errors`, `by_host` and `by_provider` leave it out. New field `summary.calls_without_host`. The `run_summary` JSON event does the same.
+- Node, `bin/vantio.js`: `vantio discover` leaves a call with no host out of the host rows and the totals. `--json` has a new field `calls_without_host`.
+- Python, `vantio/_http_observe.py`: `summary.total_calls` and `summary.hosts` leave it out. New field `summary.calls_without_host`. The Python summary has no byte total.
+- `vantio prove` reads `summary.total_calls` and `summary.total_bytes`, so it follows. Its call table still lists the record.
+
+### Wording that a user sees (needs sign-off before release)
+
+| Where | Old | New |
+| --- | --- | --- |
+| Run summary, a run with a no-host call | `LLM calls:    1` / `Hosts:        unknown` / `Total bytes:  5,000` | `LLM calls:    0` / `Hosts:        none` / `Total bytes:  unknown` |
+| Run summary, new line, only when the count is above 0 | (none) | `Calls with no known host: 1 (not counted above)` |
+| `vantio discover`, row for calls with no host | a row named `unknown` with its calls and bytes | no row |
+| `vantio discover`, new line, only when the count is above 0 | (none) | `Calls with no known host: 1 (not counted above)` |
+
+A run with no such call prints the same text as before. No README or changelog text changed.
+
+### Tests
+
+Node, `packages/vantio-cli/test/cli-config-fifo.test.js`, now 17 tests. Python, `packages/vantio-agent-sdk-py/tests/test_van394_cli_config_fifo.py`, now 22 tests.
+
+| Test | On `820cf0f` |
+| --- | --- |
+| Node 13: a call with no known host is kept, and left out of the call count and the byte totals | fail |
+| Node 14: a run with only a no-host call shows zero LLM calls and the no-host count | fail |
+| Node 15 (negative): a call to a known host is still counted with its bytes, and no no-host line is printed | fail, only on the new `calls_without_host` field |
+| Node 16: vantio discover leaves a no-host call out of the rows and totals, and counts it on its own line | fail |
+| Node 17 (negative): vantio discover still counts a known-host call with its bytes, and prints no no-host line | fail, only on the new `calls_without_host` field |
+| Node 1 to 6 (shared check now expects an empty host list, zero counts and `calls_without_host: 1`) | fail |
+| Node 7 to 12 | pass (unchanged behavior) |
+| Python `test_a_call_with_no_known_host_is_kept_and_left_out_of_the_call_count` | fail |
+| Python `test_a_call_to_a_known_host_is_still_counted_with_its_bytes` (negative) | error, only on the new `calls_without_host` field |
+| Python: the two writer-first tests and the two `/dev/stdin` tests (shared check changed the same way) | fail |
+| Python: the other 16 | pass |
+
+The old-code runs used a scratch copy of `820cf0f` under `/tmp` with the two new test files put in.
+
+### Commands
+
+Node 22.23.5, pnpm 11.13.0, Python 3.13.18, Linux. Run on this commit's tree.
+
+| Command | rc | Result |
+| --- | --- | --- |
+| `pnpm --filter @vantio/cli run lint` | 0 | |
+| `pnpm --filter @vantio/cli run test` | 0 | 197 tests: 196 pass, 1 skipped, 0 fail |
+| `pnpm run test:python` | 0 | 150 tests, OK, 2 skipped |
+| `node --test test/*.test.js` (repository root) | 0 | 5 pass |
+| `node --test test/cli-config-fifo.test.js` on the scratch copy of `820cf0f` | 1 | 17 tests: 6 pass, 11 fail |
+| `python3 -m unittest tests.test_van394_cli_config_fifo` on the scratch copy of `820cf0f` | 1 | 22 tests: 5 failures, 1 error |
+| AGENTS.md secret scan | 0 | no pattern matched |
+
+### Gaps
+
+- The no-host call is still recorded without a scope check. That was part of the same question; option A keeps the record.
+- Other readers were not changed: `vantio diff`, `search`, `tail`, `coverage`, `destinations`, `export`, and the `optics_discover_local` tool in `packages/vantio-optics-mcp` (`src/runs.js` still groups such calls under `unknown`). `vantio diff` falls back to counting `calls` only for a log with no `summary`.
+- `vantio prove` shows the lower totals but has no line for the no-host count.
+- A run log written before this commit keeps its old `summary`. `vantio discover` reads `calls`, so it treats old logs the new way.
+- `vantio discover --host` still prints the no-host line when the count is above 0.
+- The new wording has no sign-off yet.
+- Not run for this commit: the optics-mcp and agent-sdk packages (not touched), Python 3.10, 3.11 and 3.12, macOS, Windows, the drift check, the 25-run writer-first repro.
 - GitHub CI did not run (billing lock, VAN-129).

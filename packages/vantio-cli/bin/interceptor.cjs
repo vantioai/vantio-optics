@@ -1988,7 +1988,8 @@ globalThis.fetch = function vantioFetch(input, init) {
       spentUsd += (parsed.dataBytes || 0) * USD_PER_BYTE;
     }
     // The only URL is in a FIFO, device or socket that the child alone may
-    // read (VAN-394). Record the call with no host. It adds no spend.
+    // read (VAN-394). Record the call with no host. It adds no spend, and
+    // the run summary leaves it out of the call count and the byte totals.
     if (urls.length === 0 && parsed.skipped > 0) recordCli(tool, null, null, parsed.dataBytes);
   }
 
@@ -2086,9 +2087,14 @@ process.on("exit", () => {
   // this local summary. The flag does not hide it and does not invent one
   // when the run recorded nothing.
   const summaryRequested = process.env.VANTIO_SUMMARY === "1";
-  const hosts      = [...new Set(_calls.map((x) => x.hostname || "unknown"))];
+  // Owner decision, option A (VAN-394): a call with no known host stays in
+  // `calls`, but it is left out of the call count and the byte totals. It is
+  // shown as its own count instead.
+  const counted    = _calls.filter((x) => x.hostname);
+  const noHost     = _calls.length - counted.length;
+  const hosts      = [...new Set(counted.map((x) => x.hostname))];
   const now        = Date.now();
-  const totalBytes = _calls.reduce((a, x) => a + (x.bytes || 0), 0);
+  const totalBytes = counted.reduce((a, x) => a + (x.bytes || 0), 0);
 
   // NOTE: anonymous Lane 1 usage telemetry is NOT sent here. A fetch scheduled
   // inside a process "exit" handler never flushes (the event loop is already
@@ -2102,12 +2108,12 @@ process.on("exit", () => {
     const vantioHome = process.env.VANTIO_HOME || join(homedir(), ".vantio");
     const runsDir = join(vantioHome, "runs");
     mkdirSync(runsDir, { recursive: true, mode: 0o700 });
-    const providers = [...new Set(_calls.map((x) => x.provider).filter(Boolean))];
-    const errors = _calls.filter((x) => x.error || x.ok === false).length;
+    const providers = [...new Set(counted.map((x) => x.provider).filter(Boolean))];
+    const errors = counted.filter((x) => x.error || x.ok === false).length;
     const by_host = {};
     const by_provider = {};
-    for (const call of _calls) {
-      const h = call.hostname || "unknown";
+    for (const call of counted) {
+      const h = call.hostname;
       const p = call.provider || "unknown";
       by_host[h] = by_host[h] || { calls: 0, bytes: 0, errors: 0 };
       by_host[h].calls += 1;
@@ -2155,8 +2161,9 @@ process.on("exit", () => {
         error_class:   call.error_class || null,
       })),
       summary: {
-        total_calls:   _calls.length,
+        total_calls:   counted.length,
         total_bytes:   totalBytes,
+        calls_without_host: noHost,
         hosts:         hosts,
         providers,
         errors,
@@ -2191,7 +2198,8 @@ process.on("exit", () => {
       event: "run_summary",
       opticsStatus: rollup.opticsStatus,
       applicationStatus: rollup.applicationStatus,
-      calls: _calls.length,
+      calls: counted.length,
+      calls_without_host: noHost,
       hosts,
       total_bytes: totalBytes,
       duration_ms: now - _startMs,
@@ -2204,11 +2212,12 @@ process.on("exit", () => {
   const lines = [
     "",
     `${c.dim}[ ∅ VANTIO ]${c.reset} ${c.bold}Run Summary${c.reset}`,
-    `  LLM calls:    ${c.yellow}${_calls.length}${c.reset}`,
-    `  Hosts:        ${c.cyan}${hosts.join(", ")}${c.reset}`,
+    `  LLM calls:    ${c.yellow}${counted.length}${c.reset}`,
+    `  Hosts:        ${c.cyan}${hosts.join(", ") || "none"}${c.reset}`,
     `  Total bytes:  ${totalBytes > 0 ? totalBytes.toLocaleString() : "unknown"}`,
     `  Duration:     ${durationS}s`,
   ];
+  if (noHost > 0) lines.push(`  Calls with no known host: ${noHost} (not counted above)`);
   lines.push(`  ${c.dim}→ Run \`vantio prove\` to export a local proof artifact from this run.${c.reset}`);
   lines.push("");
   process.stderr.write(lines.join("\n"));

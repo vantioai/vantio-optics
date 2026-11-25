@@ -120,8 +120,13 @@ function assertOneCallWithoutHost(home, trace, tool, absent) {
   assert.equal(call.provider, "unknown");
   assert.equal(call.mediation, `node_${tool}`);
   assert.equal(call.action, "OBSERVED");
-  assert.deepEqual(Object.keys(log.summary.by_host), ["unknown"], "no watched host is counted");
-  assert.deepEqual(log.summary.hosts, ["unknown"]);
+  // Owner decision, option A: the record is kept, and it is left out of the
+  // call count, the host list and the byte totals.
+  assert.deepEqual(log.summary.by_host, {}, "no host is counted");
+  assert.deepEqual(log.summary.hosts, []);
+  assert.equal(log.summary.total_calls, 0);
+  assert.equal(log.summary.total_bytes, 0);
+  assert.equal(log.summary.calls_without_host, 1);
   for (const piece of absent) assert.ok(!text.includes(piece), `the run file holds ${piece}`);
 }
 
@@ -333,4 +338,109 @@ test("a wget list is read up to 64 KiB: a URL after that is not recorded", { tim
   assert.deepEqual(readRun(early.home, "van394listearly").log.calls.map((c) => c.hostname), ["llm.example.test"]);
   const late = await spawnOnce("wget", "van394listlate", regularFile(pad + "https://llm.example.test/v1/a\n"));
   assert.deepEqual(readRun(late.home, "van394listlate").log.calls, []);
+});
+
+// ── Owner decision, option A: a call with no known host is kept, and it is
+// left out of the LLM call count and the byte totals ──
+
+const CLI_PATH = join(__dirname, "..", "bin", "vantio.js");
+const plain = (text) => text.replace(/\x1b\[[0-9;]*m/g, "");
+
+// Runs the stand-in curl once per argv in VAN394_ARGVS, one after another.
+const SPAWN_EACH_SCRIPT = `
+const { spawnSync } = require("node:child_process");
+for (const argv of JSON.parse(process.env.VAN394_ARGVS)) spawnSync("curl", argv, { stdio: "ignore", timeout: 5000 });
+`;
+
+const NO_HOST_ARGV = ["-K", "/dev/null", "-d", "x".repeat(5000)];
+const KNOWN_HOST_ARGV = ["-d", "y".repeat(300), "https://llm.example.test/v1/x"];
+
+async function runCurls(trace, argvs) {
+  const t = fakeEnv("curl", { VANTIO_TRACE_ID: trace, VAN394_ARGVS: JSON.stringify(argvs) });
+  const { code, signal, stderr } = await runAgent(SPAWN_EACH_SCRIPT, t.env);
+  assert.equal(signal, null, `the agent was killed: ${stderr}`);
+  assert.equal(code, 0, `stderr: ${stderr}`);
+  return { summaryText: plain(stderr), log: readRun(t.home, trace).log };
+}
+
+test("a call with no known host is kept, and left out of the call count and the byte totals", { timeout: 20000 }, async () => {
+  const { summaryText, log } = await runCurls("van394optiona", [NO_HOST_ARGV, KNOWN_HOST_ARGV]);
+  assert.deepEqual(log.calls.map((c) => c.hostname), [null, "llm.example.test"], "both records are kept");
+  assert.equal(log.calls[0].request_bytes, 5000, "the record keeps its own size");
+  assert.equal(log.summary.total_calls, 1);
+  assert.equal(log.summary.total_bytes, 300);
+  assert.equal(log.summary.calls_without_host, 1);
+  assert.deepEqual(log.summary.hosts, ["llm.example.test"]);
+  assert.deepEqual(log.summary.by_host, { "llm.example.test": { calls: 1, bytes: 300, errors: 0 } });
+  assert.equal(Object.values(log.summary.by_provider).reduce((a, p) => a + p.bytes, 0), 300);
+  assert.match(summaryText, /LLM calls: +1\n/);
+  assert.match(summaryText, /Hosts: +llm\.example\.test\n/);
+  assert.match(summaryText, /Total bytes: +300\n/);
+  assert.match(summaryText, /Calls with no known host: 1 \(not counted above\)\n/);
+});
+
+test("a run with only a no-host call shows zero LLM calls and the no-host count", { timeout: 20000 }, async () => {
+  const { summaryText, log } = await runCurls("van394optionaonly", [NO_HOST_ARGV]);
+  assert.equal(log.calls.length, 1, "the record is kept");
+  assert.equal(log.summary.total_calls, 0);
+  assert.equal(log.summary.total_bytes, 0);
+  assert.match(summaryText, /LLM calls: +0\n/);
+  assert.match(summaryText, /Hosts: +none\n/);
+  assert.match(summaryText, /Calls with no known host: 1 \(not counted above\)\n/);
+});
+
+test("a call to a known host is still counted with its bytes, and no no-host line is printed", { timeout: 20000 }, async () => {
+  const { summaryText, log } = await runCurls("van394optionaknown", [KNOWN_HOST_ARGV]);
+  assert.deepEqual(log.calls.map((c) => c.hostname), ["llm.example.test"]);
+  assert.equal(log.summary.total_calls, 1);
+  assert.equal(log.summary.total_bytes, 300);
+  assert.equal(log.summary.calls_without_host, 0);
+  assert.deepEqual(log.summary.by_host, { "llm.example.test": { calls: 1, bytes: 300, errors: 0 } });
+  assert.match(summaryText, /LLM calls: +1\n/);
+  assert.match(summaryText, /Total bytes: +300\n/);
+  assert.ok(!summaryText.includes("no known host"), summaryText);
+});
+
+function discoverLocal(calls, extraArgs) {
+  const home = mkdtempSync(join(tmpdir(), "van394-discover-"));
+  const runs = join(home, ".vantio", "runs");
+  mkdirSync(runs, { recursive: true });
+  writeFileSync(join(runs, "van394discover.json"), JSON.stringify({
+    vantio_run_log: "1",
+    trace_id: "van394discover",
+    generated_at: new Date().toISOString(),
+    calls,
+  }));
+  const run = spawnSync(process.execPath, [CLI_PATH, "discover", "--local", ...extraArgs], {
+    env: { PATH: process.env.PATH, HOME: home },
+    encoding: "utf8",
+    timeout: 15000,
+  });
+  assert.equal(run.status, 0, run.stderr);
+  return run.stdout;
+}
+
+const NO_HOST_CALL = { hostname: null, provider: "unknown", bytes: 5000, action: "OBSERVED", mediation: "node_curl" };
+const KNOWN_HOST_CALL = { hostname: "llm.example.test", provider: "unknown", bytes: 300, action: "OBSERVED", mediation: "node_curl" };
+
+test("vantio discover leaves a no-host call out of the rows and totals, and counts it on its own line", { timeout: 40000 }, () => {
+  const json = JSON.parse(discoverLocal([NO_HOST_CALL, KNOWN_HOST_CALL], ["--json"]));
+  assert.deepEqual(json.hosts.map((h) => [h.host, h.total, h.bytes]), [["llm.example.test", 1, 300]]);
+  assert.equal(json.calls_without_host, 1);
+  const text = discoverLocal([NO_HOST_CALL, KNOWN_HOST_CALL], []);
+  assert.match(text, /1 host\(s\) {2}\| {2}1 total call\(s\) observed locally\n/);
+  assert.match(text, /Calls with no known host: 1 \(not counted above\)\n/);
+  assert.ok(!/^unknown /m.test(text), text);
+  const only = discoverLocal([NO_HOST_CALL], []);
+  assert.match(only, /No LLM calls recorded/);
+  assert.match(only, /Calls with no known host: 1 \(not counted above\)\n/);
+});
+
+test("vantio discover still counts a known-host call with its bytes, and prints no no-host line", { timeout: 40000 }, () => {
+  const json = JSON.parse(discoverLocal([KNOWN_HOST_CALL], ["--json"]));
+  assert.deepEqual(json.hosts.map((h) => [h.host, h.total, h.bytes]), [["llm.example.test", 1, 300]]);
+  assert.equal(json.calls_without_host, 0);
+  const text = discoverLocal([KNOWN_HOST_CALL], []);
+  assert.match(text, /llm\.example\.test +1 +300 /);
+  assert.ok(!text.includes("no known host"), text);
 });

@@ -945,6 +945,9 @@ function discoverLocalCommand(since, hostFilter, asJson) {
 
   const hostMap = new Map();
   let scannedRuns = 0;
+  // VAN-394: a call with no known host is left out of the host rows and the
+  // totals. It is counted on its own line.
+  let noHostCalls = 0;
   const hostNeedle = hostFilter ? String(hostFilter).toLowerCase() : "";
   for (const f of files) {
     const filePath = join(runsDir(), f);
@@ -958,7 +961,8 @@ function discoverLocalCommand(since, hostFilter, asJson) {
       scannedRuns++;
       const ts = log.generated_at ? new Date(log.generated_at).getTime() : 0;
       for (const call of log.calls) {
-        const h = call.hostname || "unknown";
+        if (!call.hostname) { noHostCalls++; continue; }
+        const h = call.hostname;
         if (hostNeedle && !h.toLowerCase().includes(hostNeedle)) continue;
         const rec = hostMap.get(h) || { host: h, total: 0, bytes: 0, last_seen: null };
         rec.total++;
@@ -977,6 +981,7 @@ function discoverLocalCommand(since, hostFilter, asJson) {
       scanned_runs: scannedRuns,
       opticsStatus: hosts.length ? "SUCCESS" : "NOT_OBSERVED",
       applicationStatus: hosts.length ? "SUCCESS" : "NOT_OBSERVED",
+      calls_without_host: noHostCalls,
       hosts: hosts.map((h) => ({
         host: h.host,
         total: h.total,
@@ -999,6 +1004,7 @@ function discoverLocalCommand(since, hostFilter, asJson) {
       process.stdout.write(`\nNo LLM calls recorded in the last ${since} (${scannedRuns} run log(s) scanned, zero calls).\n`);
       process.stdout.write(`  Check that your agent is actually making LLM API calls.\n`);
     }
+    if (noHostCalls > 0) process.stdout.write(`Calls with no known host: ${noHostCalls} (not counted above)\n`);
     process.stdout.write("Next: vantio run node agent.js\n");
     return;
   }
@@ -1021,6 +1027,7 @@ function discoverLocalCommand(since, hostFilter, asJson) {
   process.stdout.write(`${div}\n`);
   const totalCalls = hosts.reduce((a, h) => a + h.total, 0);
   process.stdout.write(`${hosts.length} host(s)  |  ${totalCalls} total call(s) observed locally\n`);
+  if (noHostCalls > 0) process.stdout.write(`Calls with no known host: ${noHostCalls} (not counted above)\n`);
   process.stdout.write("Next: vantio search <query>\n\n");
 }
 

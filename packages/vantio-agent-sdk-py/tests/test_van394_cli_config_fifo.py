@@ -281,7 +281,11 @@ class FakeToolUnderShieldTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call["action"], "OBSERVED")
         self.assertNotIn("providerName", call)
         self.assertNotIn("upstreamService", call)
-        self.assertEqual(log["summary"]["hosts"], ["unknown"], "no watched host is counted")
+        # Owner decision, option A: the record is kept, and it is left out of
+        # the call count and the host list.
+        self.assertEqual(log["summary"]["hosts"], [], "no host is counted")
+        self.assertEqual(log["summary"]["total_calls"], 0)
+        self.assertEqual(log["summary"]["calls_without_host"], 1)
         for piece in ("llm.example.test", "s3cret"):
             self.assertNotIn(piece, text)
 
@@ -400,6 +404,39 @@ class FakeToolUnderShieldTests(unittest.IsolatedAsyncioTestCase):
                 await self._spawn_with_file(trace, tool, flag, target)
                 # The Python wrapper writes no run file when nothing was recorded.
                 self.assertFalse(os.path.exists(self._run_file(trace)), f"{tool} {target}")
+
+    # Owner decision, option A: a call with no known host is kept, and it is
+    # left out of the LLM call count.
+
+    async def _run_curls(self, trace: str, argvs: list) -> dict:
+        def body(result: dict) -> None:
+            for argv in argvs:
+                proc = subprocess.Popen(["curl", *argv], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                self._wait(proc)
+
+        await self._under_shield(trace, body)
+        with open(self._run_file(trace), encoding="utf-8") as fh:
+            return json.load(fh)
+
+    async def test_a_call_with_no_known_host_is_kept_and_left_out_of_the_call_count(self) -> None:
+        log = await self._run_curls("van394-option-a", [_NO_HOST_ARGV, _KNOWN_HOST_ARGV])
+        self.assertEqual([c["hostname"] for c in log["calls"]], [None, "llm.example.test"], "both records are kept")
+        self.assertEqual(log["calls"][0]["bytes_observed"], 5000, "the record keeps its own size")
+        self.assertEqual(log["summary"]["total_calls"], 1)
+        self.assertEqual(log["summary"]["calls_without_host"], 1)
+        self.assertEqual(log["summary"]["hosts"], ["llm.example.test"])
+
+    async def test_a_call_to_a_known_host_is_still_counted_with_its_bytes(self) -> None:
+        log = await self._run_curls("van394-option-a-known", [_KNOWN_HOST_ARGV])
+        self.assertEqual([c["hostname"] for c in log["calls"]], ["llm.example.test"])
+        self.assertEqual(log["calls"][0]["bytes_observed"], 300)
+        self.assertEqual(log["summary"]["total_calls"], 1)
+        self.assertEqual(log["summary"]["calls_without_host"], 0)
+        self.assertEqual(log["summary"]["hosts"], ["llm.example.test"])
+
+
+_NO_HOST_ARGV = ["-K", "/dev/null", "-d", "x" * 5000]
+_KNOWN_HOST_ARGV = ["-d", "y" * 300, "https://llm.example.test/v1/x"]
 
 
 if __name__ == "__main__":

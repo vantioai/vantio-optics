@@ -1997,7 +1997,8 @@ def _apply_cli_gate(
     mediation = _cli_mediation(tool)
     if not urls:
         # The only URL is in a FIFO, device or socket that the child alone may
-        # read (VAN-394). Record the call with no host. It adds no spend.
+        # read (VAN-394). Record the call with no host. It adds no spend, and
+        # the run summary leaves it out of the call count.
         if skipped:
             _record(None, "OBSERVED", mediation, path=None, bytes_observed=data_bytes)
         return
@@ -2210,7 +2211,11 @@ def _write_run_log() -> None:
         runs = os.path.join(home, "runs")
         os.makedirs(runs, mode=0o700, exist_ok=True)
         now = datetime.now(timezone.utc)
-        hosts = sorted({c.get("hostname") or "unknown" for c in _calls})
+        # Owner decision, option A (VAN-394): a call with no known host stays
+        # in `calls`, but it is left out of the call count. It is shown as its
+        # own count instead.
+        counted = [c for c in _calls if c.get("hostname")]
+        hosts = sorted({c["hostname"] for c in counted})
         mediations = sorted({c.get("mediation") or "python_urllib" for c in _calls})
         optics_status, application_status = _rollup_status(_calls)
         customer = summarize_customer_fields(_calls, application_status)
@@ -2236,7 +2241,8 @@ def _write_run_log() -> None:
             "generated_at": now.isoformat(),
             "calls": list(_calls),
             "summary": {
-                "total_calls": len(_calls),
+                "total_calls": len(counted),
+                "calls_without_host": len(_calls) - len(counted),
                 "hosts": hosts,
                 "opticsStatus": optics_status,
                 "applicationStatus": application_status,
