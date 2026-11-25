@@ -68,3 +68,67 @@ Branch `engineering/van-191-claude-optics-publishing-docs-and-drift`, from `main
 ## llms-full.txt regenerated (VAN-382)
 
 `docs/products/optics/llms-full.txt` copies the manual pages, and this branch changed pages without updating the copy. It was rebuilt with `node scripts/check_llms_full.mjs --write` from vantio-optics #30 (VAN-382). Only llms-full.txt changed, and only on the page lines this branch already changed. With #30's check copied in, it exits 0 on this head (it exited 1 before). Secret scan rc 0. CI is blocked by the billing lock (VAN-129).
+
+## Follow-up on 2026-11-24
+
+Base: `main` at `8bee543`. Before this follow-up the branch head was `3ad0f4f`; `main` was merged in as `ca9b5ad`. The commands below ran on the tree of the commit that adds this section (its parent is `ca9b5ad`). This section replaces the README.md and TELEMETRY.md lines in the gap list above.
+
+### What changed
+
+- `docs/products/optics/README.md`: the Python row says a fresh install is 3.1.2 and this tree is 3.1.3 (was 3.1.1 and 3.1.2). Two more 3.1.1 cites in the next paragraph are 3.1.2. Numbers only, plus the check date on the row.
+- `docs/products/optics/TELEMETRY.md`: "current release" and the "Published Python" heading and sentence say 3.1.2 (was 3.1.1). Numbers only.
+- `docs/products/optics/VERSION-METADATA.json`: `source_tree` Python is 3.1.3 (was 3.1.2).
+- `docs/products/optics/llms-full.txt`: rebuilt from the pages.
+- `scripts/check_open_core_drift.py` header: names no version number now. It points to the table in `docs/publishing.md`.
+- `test/docs-versions.test.js`: 7 new tests. Tree versions in the manual README table and in `VERSION-METADATA.json` must equal the package files. Published versions in `publishing.md`, `INSTALLATION.md`, the manual README table and `TELEMETRY.md` must equal `VERSION-METADATA.json`. The drift script header must name no version number. Two of the new tests are negative cases.
+
+No package code changed. No package version changed. Nothing published, tagged or dispatched.
+
+### Facts checked on 2026-11-24 (read-only)
+
+| Check | Result |
+| --- | --- |
+| `npm view @vantio/cli version dist-tags` | 0.3.27, latest 0.3.27 |
+| PyPI JSON `vantio-agent-sdk` | latest 3.1.2 |
+| Tree: `packages/*/package.json`, `pyproject.toml` | CLI 0.3.27, agent-sdk 0.2.4, optics-mcp 0.1.2, Python 3.1.3 |
+| 3.1.2 wheel from PyPI: `vantio/__init__.py` | `__version__ = "3.1.2"` |
+| `cmp` 3.1.2 wheel `vantio/_telemetry.py` with this tree | rc 0, same |
+| `cmp` 3.1.2 wheel `vantio/_http_observe.py` with this tree | rc 1, differ at line 678 |
+| open-core `main` (`1beaf36`) `pypi-publish.yml` | names 3.1.3 and `custody-py-3.1.3` |
+
+### Commands and results
+
+Node v22.23.5, pnpm 11.13.0, Python 3.13.18.
+
+| Command | rc | Result |
+| --- | --- | --- |
+| `pnpm install --frozen-lockfile` | 0 | ok |
+| new test file on the files of `main` (`8bee543`): `node --test test/docs-versions.test.js` | 1 | 7 of 11 fail, 4 pass |
+| same on this tree | 0 | 11 pass |
+| `pnpm --filter @vantio/cli run lint` | 0 | pass |
+| `pnpm --filter @vantio/optics-mcp run lint` | 0 | pass |
+| `pnpm --filter @vantio/agent-sdk run typecheck` | 0 | pass |
+| `pnpm --filter @vantio/agent-sdk run typecheck:test` | 0 | pass |
+| `pnpm --filter @vantio/cli run test` | 0 | 179 pass, 1 skipped |
+| `pnpm --filter @vantio/optics-mcp run test` | 0 | 8 pass |
+| `pnpm --filter @vantio/agent-sdk run test` | 0 | 42 pass |
+| `pnpm --filter @vantio/agent-sdk run build` | 0 | pass |
+| `node --test test/agent-docs.test.js test/open-core-drift-workflow.test.js test/docs-versions.test.js` | 0 | 16 pass |
+| `python3 -m unittest discover -s tests -t . -v` in `packages/vantio-agent-sdk-py` | 0 | 128 run, OK, 2 skipped |
+| `node scripts/check_llms_full.mjs` (script borrowed from #30, not committed) before the rebuild | 1 | differs at line 28 |
+| same after `--write` | 0 | matches the pages |
+| secret-scan command from `AGENTS.md` | 0 | no pattern matched |
+| `python3 scripts/check_open_core_drift.py <open-core main 1beaf36>` on this tree | 1 | one file differs: `packages/vantio-optics-mcp/src/server.js` |
+| same on `main` (`8bee543`) | 1 | the same one file |
+
+### Gaps
+
+- GitHub CI did not run: org billing lock (VAN-129). All results are local.
+- The drift check exits 1 on `main` and on this branch for `packages/vantio-optics-mcp/src/server.js`. This branch does not touch that file.
+- Python tests ran on 3.13 only. CI names 3.10, 3.11 and 3.12.
+- `ci.yml` does not run the root tests, so the new test runs only under `pnpm test`. #30 (VAN-382) adds the root tests to CI.
+- No open-core pull request. `docs/publishing.md` and `scripts/check_open_core_drift.py` are not in open-core. Its `docs/products/optics/` is an older copy (CLI 0.3.24, Python 3.0.14) with different bytes, and its root `README.md` cites PyPI 3.1.1. Not touched.
+- Still stale here, not fixed, because the fix is a wording change in public copy: pages that say this tree is Python 3.1.2 or equals the registry (`AI-GUIDE.md`, `QUICKSTART.md`, `USER-MANUAL.md`, `KNOWN-LIMITATIONS.md`, `PYTHON-GUIDE.md`, `llms.txt`, `UPGRADE-ROLLBACK-UNINSTALL.md`, `TROUBLESHOOTING.md` line 11) and `CONTRIBUTING.md` line 8. The test does not read these.
+- Published versions are not read from the registries by the test. It checks that the docs agree with `VERSION-METADATA.json`, which a person updates.
+- Earlier wording changes on this branch (`publishing.md`, `NODE-GUIDE.md`, `INSTALLATION.md`) are public docs and still need the owners' sign-off.
+- `vantio-app` troubleshooting paragraph and the CLI usage string (earlier VAN-191 comments): not touched.
