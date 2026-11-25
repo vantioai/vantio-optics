@@ -179,7 +179,7 @@ test("both method and Method: withheld in enforce, whatever the policy", () => {
   const ambiguous = '{"jsonrpc":"2.0","id":1,"method":"ping","Method":"tools/call","params":{"name":"write_file"}}\n';
   for (const pol of [ENF_ALLOW, policy("enforce", "deny"), policy("enforce", null)]) {
     const records = decide(ambiguous, pol);
-    assert.equal(records[0].decision.action, "GAP");
+    assert.equal(records[0].decision.action, "BLOCK");
     assert.equal(records[0].decision.reason, "duplicate_key");
     assert.equal(throughGate([ambiguous], pol).forwarded, "");
   }
@@ -339,4 +339,258 @@ child.on("close", () => process.exit(0));
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+// ---- keys past the 64-key cap (review round) ----
+
+function polTools(def, tools) {
+  return { schema: "vantio.mcp_policy.v1", mode: "enforce", injection: "log", rug_pull: "log", servers: { child: { default: def, tools } } };
+}
+
+function filler(n, from = 0) {
+  const o = {};
+  for (let i = from; i < from + n; i += 1) o[`k${i}`] = i;
+  return o;
+}
+
+// jsonrpc, id, method, params, then 60 filler keys: 64 stored. The next key is the 65th.
+function capFrame(extraTail, method = "tools/list", params = { name: "write_file", arguments: {} }) {
+  const head = `{"jsonrpc":"2.0","id":1,"method":${JSON.stringify(method)},"params":${JSON.stringify(params)}`;
+  const fill = JSON.stringify(filler(60)).slice(1, -1);
+  return `${head},${fill}${extraTail}}\n`;
+}
+
+const DENY_BY_NAME = polTools("deny", { write_file: { effect: "deny" } });
+const ALLOW_BY_DEFAULT = polTools("allow", { write_file: { effect: "deny" } });
+const POLICIES = [DENY_BY_NAME, ALLOW_BY_DEFAULT, policy("enforce", "allow"), policy("enforce", null)];
+
+test("METHOD past the 64th key is seen: the tools/list frame is withheld under every policy", () => {
+  const frame = capFrame(',"METHOD":"tools/call"');
+  for (const pol of POLICIES) {
+    const records = decide(frame, pol);
+    assert.equal(records[0].decision.action, "BLOCK");
+    assert.equal(records[0].decision.reason, "duplicate_key");
+    assert.equal(throughGate([frame], pol).forwarded, "");
+  }
+});
+
+test("the case-variant key before the 64th key is withheld too", () => {
+  const frame = `{"jsonrpc":"2.0","id":1,"method":"tools/list","METHOD":"tools/call",${JSON.stringify(filler(70)).slice(1, -1)}}\n`;
+  for (const pol of POLICIES) assert.equal(throughGate([frame], pol).forwarded, "");
+});
+
+test("Params and Name past the cap make the object ambiguous", () => {
+  const top = capFrame(',"Params":{"name":"x"}');
+  assert.equal(decide(top, ENF_ALLOW)[0].decision.reason, "duplicate_key");
+  const inner = `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"read_file",${JSON.stringify(filler(70)).slice(1, -1)},"NAME":"write_file"}}\n`;
+  for (const pol of POLICIES) {
+    assert.equal(decide(inner, pol)[0].decision.reason, "duplicate_key");
+    assert.equal(throughGate([inner], pol).forwarded, "");
+  }
+});
+
+test("an exact duplicate of method past the cap is withheld", () => {
+  const dup = capFrame(',"method":"tools/call"');
+  assert.equal(decide(dup, ENF_ALLOW)[0].decision.reason, "duplicate_key");
+  assert.equal(throughGate([dup], ENF_ALLOW).forwarded, "");
+  const both = `{"jsonrpc":"2.0","id":1,${JSON.stringify(filler(70)).slice(1, -1)},"METHOD":"ping","METHOD":"tools/call"}\n`;
+  assert.equal(decide(both, ENF_ALLOW)[0].decision.reason, "duplicate_key");
+});
+
+test("a case-variant key that is the only method key is read, even past the cap", () => {
+  const line = `{"jsonrpc":"2.0","id":1,${JSON.stringify(filler(70)).slice(1, -1)},"METHOD":"tools/call","PARAMS":{"name":"write_file"}}\n`;
+  const records = decide(line, ENF_ALLOW);
+  assert.equal(records[0].method, "tools/call");
+  assert.equal(records[0].decision.action, "BLOCK");
+  assert.equal(throughGate([line], ENF_ALLOW).forwarded, "");
+});
+
+test("negative: 65 unrelated keys and no folding key are judged as before", () => {
+  const line = `{"jsonrpc":"2.0","id":2,"method":"ping",${JSON.stringify(filler(65)).slice(1, -1)}}\n`;
+  const records = decide(line, ENF_ALLOW);
+  assert.equal(records[0].method, "ping");
+  assert.equal(records[0].findings.some((f) => f.kind === "truncated_shape"), true);
+  // As before this change: judged as ping, and a truncated shape is refused.
+  assert.equal(records[0].decision.action, "BLOCK");
+  assert.equal(records[0].decision.reason, "truncated_shape");
+  assert.equal(throughGate([line], ENF_ALLOW).forwarded, "");
+  // A truncated tools/list is the one passthrough that is still logged and forwarded.
+  const list = `{"jsonrpc":"2.0","id":2,"method":"tools/list",${JSON.stringify(filler(65)).slice(1, -1)}}\n`;
+  assert.equal(decide(list, ENF_ALLOW)[0].method, "tools/list");
+  assert.equal(throughGate([list], ENF_ALLOW).forwarded, list);
+});
+
+test("negative: a tools/call with a large arguments object is judged by its real name", () => {
+  const args = filler(70);
+  const line = `${JSON.stringify({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "write_file", arguments: args } })}\n`;
+  const [record] = decide(line, ALLOW_BY_DEFAULT);
+  assert.equal(record.method, "tools/call");
+  assert.equal(record.decision.action, "BLOCK");
+  assert.equal(record.decision.reason, "truncated_shape");
+  assert.equal(throughGate([line], ALLOW_BY_DEFAULT).forwarded, "");
+});
+
+test("observe: frames with keys past the cap reach the child unchanged", () => {
+  const obs = policy("observe", "allow");
+  for (const line of [capFrame(',"METHOD":"tools/call"'), capFrame(',"method":"tools/call"')]) {
+    assert.equal(throughGate([line], obs).forwarded, line);
+  }
+});
+
+// A reader that folds key case and takes the last key, as Go's encoding/json
+// does. It writes the method and tool it ran to a file.
+const LENIENT_CHILD = `
+const fs = require("fs");
+let buf = "";
+process.stdin.on("data", (c) => {
+  buf += c.toString("latin1");
+  let i;
+  while ((i = buf.indexOf("\\n")) >= 0) {
+    const line = buf.slice(0, i);
+    buf = buf.slice(i + 1);
+    let o;
+    try { o = JSON.parse(line); } catch { continue; }
+    const low = (x) => { const r = {}; for (const k of Object.keys(x)) r[k.toLowerCase()] = x[k]; return r; };
+    const r = low(o);
+    const p = r.params && typeof r.params === "object" ? low(r.params) : {};
+    fs.appendFileSync(process.env.SINK, "RAN " + r.method + " " + (p.name || "") + "\\n");
+  }
+});
+`;
+
+test("end to end: a reader that folds case does not run the frame the policy did not judge", async () => {
+  const home = mkdtempSync(join(tmpdir(), "vantio-van455-lenient-"));
+  try {
+    const child = join(home, "child.js");
+    writeFileSync(child, LENIENT_CHILD);
+    const agent = join(home, "agent.js");
+    writeFileSync(
+      agent,
+      `const { spawn } = require("node:child_process");
+const c = spawn(process.execPath, [process.env.CHILD], { stdio: ["pipe", "pipe", "ignore"], env: process.env });
+c.stdout.on("data", () => {});
+c.stdin.write(process.env.FRAME);
+c.stdin.end();
+c.on("close", () => process.exit(0));`,
+    );
+    const tooMany = JSON.stringify(filler(60)).slice(1, -1);
+    const frame = `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"name":"write_file"},${tooMany},"METHOD":"tools/call"}\n`;
+    for (const def of ["allow", "deny", null]) {
+      const sink = join(home, `sink-${def}`);
+      writeFileSync(sink, "");
+      const policyFile = join(home, `policy-${def}.json`);
+      writeFileSync(policyFile, JSON.stringify({ servers: def ? { node: { default: def, tools: { write_file: { effect: "deny" } } } } : {} }));
+      const result = await runCli(["run", "--mcp-enforce", "node", agent], { HOME: home, CHILD: child, FRAME: frame, SINK: sink, VANTIO_MCP_POLICY: policyFile });
+      assert.equal(result.code, 0, result.stderr);
+      assert.equal(readFileSync(sink, "utf8").includes("RAN"), false, `policy ${def}`);
+    }
+    // Control: the reader does run a frame that is allowed.
+    const sink = join(home, "sink-control");
+    writeFileSync(sink, "");
+    const policyFile = join(home, "policy-control.json");
+    writeFileSync(policyFile, JSON.stringify({ servers: { node: { default: "allow", tools: {} } } }));
+    const ok = `${PING}\n`;
+    const result = await runCli(["run", "--mcp-enforce", "node", agent], { HOME: home, CHILD: child, FRAME: ok, SINK: sink, VANTIO_MCP_POLICY: policyFile });
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(readFileSync(sink, "utf8"), /RAN ping/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// ---- one big write, and the server side (review round) ----
+
+function timed(fn) {
+  const start = Date.now();
+  const value = fn();
+  return { value, ms: Date.now() - start };
+}
+
+test("one write of 200,000 CR bytes, then a ping line: enforce and observe finish and keep the bytes", () => {
+  for (const mode of ["enforce", "observe"]) {
+    const input = `${"\r".repeat(200000)}${PING}\n`;
+    const { value, ms } = timed(() => throughGate([input], policy(mode, "allow")));
+    assert.equal(value.forwarded, input, mode);
+    assert.equal(ms < 10000, true, `${mode} took ${ms} ms`);
+    assert.equal(value.records.some((r) => r.method === "ping"), true);
+  }
+});
+
+test("one write of 200,000 LF bytes, then a ping line", () => {
+  for (const mode of ["enforce", "observe"]) {
+    const input = `${"\n".repeat(200000)}${PING}\n`;
+    const { value } = timed(() => throughGate([input], policy(mode, "allow")));
+    assert.equal(value.forwarded, input, mode);
+  }
+});
+
+test("1,000,000 mixed CR, LF and text bytes in one write", () => {
+  const parts = [];
+  let seed = 7;
+  let size = 0;
+  while (size < 1000000) {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    const piece = ["\r", "\n", "\r\n", "x", "abc", PING + "\r", "\r\r"][seed % 7];
+    parts.push(piece);
+    size += piece.length;
+  }
+  const input = parts.join("");
+  for (const mode of ["enforce", "observe"]) {
+    const { value, ms } = timed(() => throughGate([input], policy(mode, "allow")));
+    assert.equal(value.forwarded, input, mode);
+    assert.equal(ms < 20000, true, `${mode} took ${ms} ms`);
+  }
+});
+
+test("a blocked frame inside a large CR run is still withheld", () => {
+  const input = `${"\r".repeat(150000)}${CALL}\r${"\r".repeat(50000)}${PING}\n`;
+  const { forwarded } = throughGate([input], ENF_ALLOW);
+  assert.equal(forwarded.includes("CANARY_VAN455"), false);
+  assert.equal(forwarded.endsWith(`${PING}\n`), true);
+  assert.equal(forwarded.length, 200000 + PING.length + 1);
+});
+
+test("the gate does not hang when the child stream cannot be written", () => {
+  const runtime = createRuntime();
+  const fromChild = new PassThrough();
+  const toChild = new Writable({
+    write() {
+      throw new Error("closed");
+    },
+  });
+  const gate = runtime.createStdioPairGate({ fromChild, toChild, serverId: "child", policy: ENF_ALLOW, onRecord: () => {} });
+  const done = new Promise((resolve) => gate.stdin.end(Buffer.from(`${PING}\n`), resolve));
+  return done;
+});
+
+function gateWithServer(serverChunks, pol) {
+  const runtime = createRuntime();
+  const fromChild = new PassThrough();
+  const out = [];
+  const records = [];
+  const gate = runtime.createStdioPairGate({
+    fromChild,
+    toChild: new Writable({ write: (_c, _e, cb) => cb() }),
+    serverId: "child",
+    policy: pol,
+    onRecord: (r) => records.push(r),
+  });
+  gate.stdout.on("data", (c) => out.push(Buffer.from(c)));
+  for (const chunk of serverChunks) fromChild.write(Buffer.from(chunk));
+  fromChild.end();
+  return new Promise((resolve) => fromChild.on("end", () => setImmediate(() => resolve({ out: Buffer.concat(out).toString("latin1"), records }))));
+}
+
+test("server side: the child's last line without a line end is flushed and judged", async () => {
+  const plain = await gateWithServer(["first\n", "tail"], ENF_ALLOW);
+  assert.equal(plain.out, "first\ntail");
+  const json = await gateWithServer([`{"jsonrpc":"2.0","method":"notifications/message","params":{}}`], ENF_ALLOW);
+  assert.equal(json.records.some((r) => r.direction === "server_to_client"), true);
+});
+
+test("server side: an unterminated JSON tail is withheld in enforce when the policy refuses it", async () => {
+  const refused = await gateWithServer([`{"jsonrpc":"2.0","method":"sampling/createMessage","id":3,"params":{}}`], policy("enforce", null));
+  assert.equal(refused.out.includes("sampling/createMessage"), false);
+  const observed = await gateWithServer([`{"jsonrpc":"2.0","method":"sampling/createMessage","id":3,"params":{}}`], policy("observe", null));
+  assert.equal(observed.out, `{"jsonrpc":"2.0","method":"sampling/createMessage","id":3,"params":{}}`);
 });

@@ -103,7 +103,8 @@ export function assemble(key) {
 
   function runBuffer(buffer, meta) {
     const framer = createFramer(meta.transport || "stdio");
-    const frames = [...framer.push(buffer), ...framer.finish()];
+    const frames = framer.push(buffer);
+    for (const fr of framer.finish()) frames.push(fr);
     const records = [];
     let session = store.get(meta.serverId);
     for (const fr of frames) {
@@ -149,7 +150,7 @@ export function assemble(key) {
           serverId: typeof safe.serverId === "string" ? safe.serverId : "unspecified",
           policyObject,
         });
-        records.push(...out.records);
+        for (const record of out.records) records.push(record);
         session = out.session || session;
       }
       return { records, session };
@@ -159,9 +160,7 @@ export function assemble(key) {
       const safe = meta && typeof meta === "object" ? meta : {};
       const policyObject = normalizePolicy(safe.policy);
       const framer = createFramer(safe.transport || "stdio");
-      const tap = tapReadable(readable, (chunk) => {
-        if (!chunk) return;
-        const frames = framer.push(chunk);
+      const judge = (frames) => {
         for (const fr of frames) {
           const out = evaluateFrame(
             { ...safe, policyObject, serverId: safe.serverId || "unspecified", direction: safe.direction || "server_to_client" },
@@ -169,7 +168,15 @@ export function assemble(key) {
           );
           if (safe.onRecord) safe.onRecord(out.record);
         }
-      });
+      };
+      const tap = tapReadable(
+        readable,
+        (chunk) => {
+          if (!chunk) return;
+          judge(framer.push(chunk));
+        },
+        () => judge(framer.finish()),
+      );
       if (tap.ok) taps += 1;
       return tap;
     },
@@ -205,6 +212,11 @@ export function assemble(key) {
       const gate = createStdioPairGate({
         fromChild: meta.fromChild,
         toChild: meta.toChild,
+        enforce: policyObject.mode === "enforce",
+        onFault: () => {
+          const gap = gapDecision("gate_error");
+          if (meta.onRecord) meta.onRecord(recordOf({ ...meta, direction: "client_to_server", transport: "stdio" }, { ...gap, action: "GAP" }));
+        },
         onClientFrame: (fr) => {
           const out = evaluateFrame(
             { ...meta, policyObject, direction: "client_to_server", pair: true },

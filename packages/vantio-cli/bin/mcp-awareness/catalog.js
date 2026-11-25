@@ -5,6 +5,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { foldKey } from "./parse.js";
 import {
   MAX_CANON,
   MAX_NAME,
@@ -287,34 +288,29 @@ export function cloneSession(session) {
   };
 }
 
-// A lenient JSON reader (Go's encoding/json, for one) matches a field name in
-// any letter case. Read these keys the same way: `Method` is `method`. The
-// long s (U+017F) is the one non-ASCII letter that folds into a letter of
-// these names. Two keys that fold to one name are ambiguous.
+// Read these keys in any letter case: `Method` is `method`. The parser counts
+// every key that folds to one of these names, stored or not (parse.js, folds),
+// so a key past the key cap is still seen. Two keys that fold to one name, or
+// one key given twice, are ambiguous: a reader may take either.
 const RPC_NAMES = ["jsonrpc", "method", "id", "params", "result", "error"];
 const PARAM_NAMES = ["name", "arguments"];
 
-function foldKey(key) {
-  return key.toLowerCase().replace(/\u017f/g, "s");
-}
-
 function foldedView(node, names) {
   const map = Object.create(null);
-  const seen = new Set();
   let ambiguous = false;
   for (const key of node.order) {
-    const folded = foldKey(key);
-    if (!names.includes(folded)) {
-      map[key] = node.map[key];
-    } else if (seen.has(folded)) {
-      ambiguous = true;
-    } else {
-      seen.add(folded);
-      map[folded] = node.map[key];
+    if (!names.includes(foldKey(key))) map[key] = node.map[key];
+  }
+  if (node.folds) {
+    for (const [name, hit] of node.folds) {
+      if (!names.includes(name)) continue;
+      if (hit.count > 1) ambiguous = true;
+      else map[name] = hit.value;
     }
   }
   return { map, ambiguous };
 }
+
 
 export function readEnvelope(value, flags) {
   if (!value || value.t === "array") return { batch: true, dups: flags.dups === true, truncated: flags.truncated === true };
@@ -326,9 +322,12 @@ export function readEnvelope(value, flags) {
     if (inner.ambiguous) view.ambiguous = true;
     map.params = { ...map.params, map: inner.map };
   }
-  if (view.ambiguous) {
-    return { malformed: true, ambiguous: true, dups: true, truncated: flags.truncated === true };
-  }
+  if (view.ambiguous) return { malformed: true, reason: "duplicate_key", dups: true, truncated: flags.truncated === true };
+  // Keys past the key cap are not stored. None of them can change what the
+  // policy reads: every key that folds to a name above is counted by the
+  // parser, stored or not, so a dropped key is never `method`, `id`, `params`,
+  // `name` or `arguments` in any case. A dropped key inside `arguments` makes
+  // a tools/call truncated_shape, which decideCall denies.
   const rpc = str(map.jsonrpc);
   if (rpc != null && rpc !== "2.0") return { malformed: true, dups: flags.dups === true, truncated: flags.truncated === true };
   const method = str(map.method);

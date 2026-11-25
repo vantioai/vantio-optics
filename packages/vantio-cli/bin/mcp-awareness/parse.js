@@ -29,6 +29,27 @@ function fail() {
   return null;
 }
 
+// A lenient JSON reader (Go's encoding/json, for one) matches a field name in
+// any letter case. The long s (U+017F) is the one non-ASCII letter that folds
+// into a letter of these names. Keys are fold-checked here, stored or not, so
+// the key cap (a memory bound) cannot hide one.
+const FOLD_NAMES = new Set(["jsonrpc", "method", "id", "params", "result", "error", "name", "arguments"]);
+
+export function foldKey(key) {
+  return key.toLowerCase().replace(/\u017f/g, "s");
+}
+
+function noteFold(folds, key, value) {
+  if (key.length > 9) return folds;
+  const name = foldKey(key);
+  if (!FOLD_NAMES.has(name)) return folds;
+  const map = folds || new Map();
+  const hit = map.get(name);
+  if (hit) hit.count += 1;
+  else map.set(name, { count: 1, value });
+  return map;
+}
+
 function parseValue(ctx) {
   if (ctx.depth > MAX_DEPTH) {
     ctx.truncated = true;
@@ -159,6 +180,7 @@ function parseObject(ctx) {
     return { t: "object", map, order, dup };
   }
   let stored = 0;
+  let folds = null;
   while (ctx.i < ctx.n) {
     if (s[ctx.i] !== '"') {
       ctx.depth -= 1;
@@ -181,6 +203,7 @@ function parseObject(ctx) {
       ctx.depth -= 1;
       return fail();
     }
+    folds = noteFold(folds, keyNode.v, value);
     if (Object.prototype.hasOwnProperty.call(map, keyNode.v)) {
       dup = true;
       ctx.dups = true;
@@ -200,7 +223,7 @@ function parseObject(ctx) {
     if (s[ctx.i] === "}") {
       ctx.i += 1;
       ctx.depth -= 1;
-      return { t: "object", map, order, dup };
+      return { t: "object", map, order, dup, folds };
     }
     ctx.depth -= 1;
     return fail();
@@ -322,6 +345,8 @@ function frame(kind, raw, extra) {
 
 export function createFramer(transport) {
   let buf = Buffer.alloc(0);
+  // The first `scanned` bytes of `buf` are known to hold no line end (stdio).
+  let scanned = 0;
   const kind = transport || "stdio";
 
   function pull(end) {
@@ -339,6 +364,7 @@ export function createFramer(transport) {
       const room = MAX_FRAME - buf.length;
       if (room <= 0) {
         buf = Buffer.alloc(0);
+        scanned = 0;
         out.push(frame("oversize", Buffer.alloc(0)));
         continue;
       }
@@ -346,9 +372,10 @@ export function createFramer(transport) {
       const piece = next.subarray(offset, offset + take);
       buf = buf.length === 0 ? Buffer.from(piece) : Buffer.concat([buf, piece]);
       offset += take;
-      out.push(...pull(false));
+      for (const fr of pull(false)) out.push(fr);
       if (buf.length >= MAX_FRAME) {
         buf = Buffer.alloc(0);
+        scanned = 0;
         out.push(frame("oversize", Buffer.alloc(0)));
       }
     }
@@ -359,6 +386,7 @@ export function createFramer(transport) {
     const out = pull(true);
     if (buf.length > MAX_FRAME) {
       buf = Buffer.alloc(0);
+      scanned = 0;
       out.push(frame("oversize", Buffer.alloc(0)));
     }
     return out;
@@ -366,8 +394,16 @@ export function createFramer(transport) {
 
   function pullStdio(end) {
     const out = [];
-    while (buf.length) {
-      if (startsWithContentLength(buf)) {
+    // `pos` walks forward through buf. buf is cut once, when the loop ends,
+    // so a long run of short lines costs one pass, not one copy per line.
+    let pos = 0;
+    let nextScanned = 0;
+    while (pos < buf.length) {
+      const rest = pos === 0 ? buf : buf.subarray(pos);
+      if (startsWithContentLength(rest)) {
+        buf = rest;
+        pos = 0;
+        scanned = 0;
         const taken = takeContentLength();
         if (taken === "need") break;
         if (taken) out.push(taken);
@@ -376,12 +412,15 @@ export function createFramer(transport) {
       // A line ends at LF, at CRLF, or at a lone CR. A reader that splits on
       // CR sees a frame after a CR as a line of its own. The raw bytes of each
       // line keep their CR and LF as they came.
-      const eol = findLineEnd(buf);
+      const eol = findLineEnd(buf, pos + (pos === 0 ? scanned : 0));
       if (eol < 0) {
         if (end) {
-          if (buf.length) out.push(lineFrame(buf));
+          if (rest.length) out.push(lineFrame(rest));
           buf = Buffer.alloc(0);
+          scanned = 0;
+          return out;
         }
+        nextScanned = buf.length - pos;
         break;
       }
       let cut = eol + 1;
@@ -392,14 +431,18 @@ export function createFramer(transport) {
           // A CR is the last byte. A LF may follow in the next chunk, and a
           // CRLF line must be judged whole. Hold a line that is checked; a
           // line that is ignored anyway goes on at once.
-          const lone = lineFrame(buf.subarray(0, cut));
-          if (lone.kind !== "ignore") break;
+          const lone = lineFrame(buf.subarray(pos, cut));
+          if (lone.kind !== "ignore") {
+            nextScanned = eol - pos;
+            break;
+          }
         }
       }
-      const raw = buf.subarray(0, cut);
-      buf = buf.subarray(cut);
-      out.push(lineFrame(raw));
+      out.push(lineFrame(buf.subarray(pos, cut)));
+      pos = cut;
     }
+    if (pos > 0) buf = pos >= buf.length ? Buffer.alloc(0) : buf.subarray(pos);
+    scanned = nextScanned;
     return out;
   }
 
@@ -510,7 +553,8 @@ export function createFramer(transport) {
     const type = headerValue(head, "content-type");
     if (type.includes("text/event-stream")) {
       const sse = createFramer("sse");
-      out.push(...sse.push(body), ...sse.finish());
+      for (const fr of sse.push(body)) out.push(fr);
+      for (const fr of sse.finish()) out.push(fr);
       return out;
     }
     const decoded = decodeUtf8(body);
@@ -541,12 +585,13 @@ export function createFramer(transport) {
   };
 }
 
-function findLineEnd(buffer) {
-  const lf = buffer.indexOf(0x0a);
-  const cr = buffer.indexOf(0x0d);
-  if (lf < 0) return cr;
-  if (cr < 0) return lf;
-  return Math.min(lf, cr);
+// One forward scan from `from`. Returns the index of the first LF or CR, or -1.
+function findLineEnd(buffer, from) {
+  for (let i = from; i < buffer.length; i += 1) {
+    const b = buffer[i];
+    if (b === 0x0a || b === 0x0d) return i;
+  }
+  return -1;
 }
 
 function startsWithContentLength(buffer) {
