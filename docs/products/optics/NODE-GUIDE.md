@@ -76,7 +76,7 @@ Exit status for these commands: 0 when the command finished, including an empty 
 
 ## Coverage, destinations, and export
 
-These commands are in the CLI source in this repository. They are not in the published npm package `@vantio/cli@0.3.27`.
+These commands are in the CLI source in this repository and in the published npm package `@vantio/cli@0.3.27`.
 
 `vantio coverage` reads local run logs and MCP observation lines and prints processes, connections, paths on the allowlist, and paths outside it. `--json` prints that view as JSON.
 

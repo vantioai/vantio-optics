@@ -4,22 +4,22 @@ This repository does not publish when a pull request merges. `.github/workflows/
 
 ## Freeze while open-core publishes
 
-Until the npm and PyPI trusted publishers point at this repository, `vantioai/vantio-open-core` is the publishing source. It publishes `@vantio/cli` 0.3.27 and `vantio-agent-sdk` 3.1.2 from sealed bytes. The `package.json` and `pyproject.toml` links here name this repository, so a pack from this tree does not match those sealed bytes. Do not publish those versions from here.
+Until the npm and PyPI trusted publishers point at this repository, `vantioai/vantio-open-core` is the publishing source. It published `@vantio/cli` 0.3.27 and `vantio-agent-sdk` 3.1.2 from sealed bytes. It also holds sealed `vantio-agent-sdk` 3.1.3 bytes that are not published. The `package.json` and `pyproject.toml` links here name this repository, so a pack from this tree does not match those sealed bytes. Do not publish those versions from here.
 
 During the freeze, package code in `packages/` and `extensions/vantio-optics` stays byte-identical to open-core `main`. Make a code change in both repositories in the same change window. The `Open-core drift` workflow (`scripts/check_open_core_drift.py`) fails on any other difference. READMEs, changelogs, tests, and repository links may differ.
 
 The freeze ends when the first release after 0.3.27 and 3.1.2 is cut from this repository, the trusted publishers are switched as described below, and the package directories are removed from open-core. Remove the drift workflow in that same change.
 
-Registry check on 2026-11-19:
+Registry check on 2026-11-20:
 
 | Package | Registry | Latest | This tree |
 | --- | --- | --- | --- |
 | `@vantio/cli` | npm | 0.3.27 | 0.3.27 |
 | `@vantio/agent-sdk` | npm | 0.2.4 | 0.2.4 |
 | `@vantio/optics-mcp` | npm | 0.1.2 | 0.1.2 |
-| `vantio-agent-sdk` | PyPI | 3.1.2 | 3.1.2 |
+| `vantio-agent-sdk` | PyPI | 3.1.2 | 3.1.3 |
 
-npm and PyPI reject a second upload of a version that already exists. A later publish from this tree is a new version, not a copy of 0.3.24 or 3.1.1.
+npm and PyPI reject a second upload of a version that already exists. A later publish from this tree is a new version, not a copy of 0.3.27 or 3.1.2.
 
 ## What the registries show today
 
@@ -33,7 +33,7 @@ PyPI trusted publishing for `vantio-agent-sdk` is wired in `vantio-open-core` at
 - `id-token: write`
 - `pypa/gh-action-pypi-publish`
 
-It publishes a sealed 3.1.1 artifact. This repository does not contain that seal, those digests, or that custody tag.
+It is set up for the sealed 3.1.3 wheel and sdist and the custody tag `custody-py-3.1.3`, which is not created yet. This repository does not contain that seal, those digests, or that custody tag.
 
 ## Switch npm trusted publishing to this repository
 
@@ -70,7 +70,7 @@ Project: `vantio-agent-sdk`. Docs: https://docs.pypi.org/trusted-publishers/
    - Environment name: `pypi`
 3. The workflow job must set `permissions: id-token: write`, `environment: pypi`, and use `pypa/gh-action-pypi-publish` with no password and no token. The disabled job in `publish.yml` is that shape.
 4. After a publish from this repository succeeds, remove the publisher that names `vantioai/vantio-open-core` and workflow `pypi-publish.yml`. Until you remove it, open-core can still match its own workflow.
-5. Do not republish 3.1.1. The next PyPI upload from this tree is a new version. The tree's current version is 3.1.2. Confirm that version is the one you mean before you delete `publishing-disabled`, remove `needs: publishing-disabled`, and remove `if: false` from `publish-pypi`.
+5. Do not republish 3.1.2 or an earlier version. The next PyPI upload from this tree is a new version. The tree's current version is 3.1.3, which open-core has sealed but not published, so do not publish 3.1.3 from here. Confirm that version is the one you mean before you delete `publishing-disabled`, remove `needs: publishing-disabled`, and remove `if: false` from `publish-pypi`.
 6. Do not dispatch the workflow from this pull request. Do not create a tag as part of turning the publisher around.
 
 ## What stays disabled until those steps are done

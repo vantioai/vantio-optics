@@ -37,7 +37,7 @@ Timeout: 3 seconds. Errors are discarded. The agent is not failed when the ping 
 
 ## Older release: Python 3.0.14
 
-This is not the package `pip install vantio-agent-sdk` returns. Pin `==3.0.14` to get it. The current release is 3.1.1, described above.
+This is not the package `pip install vantio-agent-sdk` returns. Pin `==3.0.14` to get it. The current release is 3.1.2, described above.
 
 `shield()` (decorator or `async with`) calls `send_run_telemetry_once` on entry. That function sends when `is_telemetry_disabled()` is false. In 3.0.14 that function is false unless `VANTIO_TELEMETRY_DISABLED=1` or `DO_NOT_TRACK=1`.
 
@@ -53,9 +53,9 @@ DO_NOT_TRACK=1 python agent.py
 
 The automatic `shield()` ping is one `run` event per process. It is sent before HTTP observations are recorded, so `callCount` is 0 and `hosts` is empty.
 
-## Published Python 3.1.1 and this tree
+## Published Python 3.1.2 and this tree
 
-The `shield()` call site uses the same gate as the CLI: the ping stays off unless `VANTIO_TELEMETRY=1`. `VANTIO_TELEMETRY_DISABLED=1` and `DO_NOT_TRACK=1` still force it off. The 3.1.1 wheel's telemetry module matches this tree. PyPI latest on 2026-09-27 was 3.0.14. That is no longer the latest release. Do not describe 3.0.14 as the unpinned install.
+The `shield()` call site uses the same gate as the CLI: the ping stays off unless `VANTIO_TELEMETRY=1`. `VANTIO_TELEMETRY_DISABLED=1` and `DO_NOT_TRACK=1` still force it off. The 3.1.2 wheel's telemetry module matches this tree. PyPI latest on 2026-09-27 was 3.0.14. That is no longer the latest release. Do not describe 3.0.14 as the unpinned install.
 
 ## Payload
 
