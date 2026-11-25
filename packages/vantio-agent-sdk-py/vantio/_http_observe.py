@@ -25,6 +25,7 @@ import asyncio
 import http.client
 import json
 import os
+import re
 import shlex
 import socket
 import ssl
@@ -622,7 +623,7 @@ def _rollup_status(calls: list[dict[str, Any]]) -> tuple[str, str]:
 
 
 def _record(
-    hostname: str,
+    hostname: Optional[str],
     action: str,
     mediation: str,
     **extra: Any,
@@ -1636,8 +1637,13 @@ def _bytes_from_curl_form_value(value: Any, treat_at_as_file: bool, stdin_size: 
     return len(rhs.encode("utf-8"))
 
 
-def _urls_from_list_file(path: str, stdin_size: int = 0, kwargs: Optional[dict[str, Any]] = None) -> list[str]:
-    cap = 65536
+def _urls_from_list_file(
+    path: str,
+    stdin_size: int = 0,
+    kwargs: Optional[dict[str, Any]] = None,
+    skipped: Optional[list[str]] = None,
+) -> list[str]:
+    cap = _CLI_LIST_CAP
     max_urls = 32
     text = ""
     kwargs = kwargs or {}
@@ -1663,7 +1669,7 @@ def _urls_from_list_file(path: str, stdin_size: int = 0, kwargs: Optional[dict[s
                 raw = os.pread(fd, min(int(stdin_size) or 0, cap), 0)
                 text = raw.decode("utf-8", "replace")
         else:
-            raw = _read_regular_file(str(path), cap)
+            raw = _read_regular_file(str(path), cap, skipped)
             if raw is None:
                 return []
             text = raw.decode("utf-8", "replace")
@@ -1693,29 +1699,67 @@ _CURL_DATA_AT_FILE = {
 }
 
 
-_CLI_CONFIG_CAP = 64 * 1024
+# Limits on what is read to find a URL (VAN-394). A curl -K config is read up
+# to 1 MiB; a URL after that is not seen. A wget -i list is read up to 64 KiB,
+# as before.
+_CLI_CONFIG_CAP = 1024 * 1024
+_CLI_LIST_CAP = 64 * 1024
+
+_PER_PROCESS_PATH = re.compile(
+    r"^/dev/(?:stdin|stdout|stderr|fd/\d+)$|^/proc/(?:self|thread-self)/fd/\d+$"
+)
 
 
-def _read_regular_file(path: str, cap: int) -> Optional[bytes]:
+def _is_special_file(mode: int) -> bool:
+    return stat.S_ISFIFO(mode) or stat.S_ISSOCK(mode) or stat.S_ISCHR(mode) or stat.S_ISBLK(mode)
+
+
+def _read_regular_file(path: str, cap: int, skipped: Optional[list[str]] = None) -> Optional[bytes]:
     """Read up to cap bytes of a regular file, or return None.
 
-    The child curl or wget reads this file after we do. A FIFO, a device or a
-    socket would block here (or be drained before the child sees it), so the
-    open is non-blocking and anything but a regular file is skipped (VAN-394).
+    The child curl or wget reads this file after we do, so only a regular file
+    is opened (VAN-394). Stat comes first: opening a FIFO, even non-blocking,
+    lets a waiting writer through and the close then breaks its pipe. The open
+    is still non-blocking and checked again with fstat, in case the path
+    changed after the stat; then it is closed without a read.
+
+    A FIFO, device or socket is added to ``skipped``. /dev/stdin, /dev/fd/N
+    and /proc/self/fd/N name the child's descriptors once it runs; here they
+    would name ours, so they are never opened.
     """
+
+    def skip() -> None:
+        if skipped is not None:
+            skipped.append(path)
+        return None
+
+    if _PER_PROCESS_PATH.match(path):
+        return skip()
+    before = os.stat(path).st_mode
+    if not stat.S_ISREG(before):
+        return skip() if _is_special_file(before) else None
     flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOCTTY", 0)
     fd = os.open(path, flags)
     try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
-            return None
-        return os.read(fd, cap)
+        mode = os.fstat(fd).st_mode
+        if not stat.S_ISREG(mode):
+            return skip() if _is_special_file(mode) else None
+        chunks: list[bytes] = []
+        left = cap
+        while left > 0:
+            chunk = os.read(fd, left)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            left -= len(chunk)
+        return b"".join(chunks)
     finally:
         os.close(fd)
 
 
-def _url_from_curl_config(path: str) -> Optional[str]:
+def _url_from_curl_config(path: str, skipped: Optional[list[str]] = None) -> Optional[str]:
     try:
-        raw = _read_regular_file(str(path), _CLI_CONFIG_CAP)
+        raw = _read_regular_file(str(path), _CLI_CONFIG_CAP, skipped)
     except Exception:
         return None
     if raw is None:
@@ -1735,7 +1779,9 @@ def _url_from_curl_config(path: str) -> Optional[str]:
     return None
 
 
-def _parse_curl_argv(argv: list[str], stdin_size: int = 0) -> tuple[list[str], int]:
+def _parse_curl_argv(
+    argv: list[str], stdin_size: int = 0, skipped: Optional[list[str]] = None
+) -> tuple[list[str], int]:
     url: Optional[str] = None
     data_bytes = 0
     config_paths: list[str] = []
@@ -1815,7 +1861,7 @@ def _parse_curl_argv(argv: list[str], stdin_size: int = 0) -> tuple[list[str], i
         i += 1
     if url is None:
         for path in config_paths:
-            found = _url_from_curl_config(path)
+            found = _url_from_curl_config(path, skipped)
             if found:
                 url = found
                 break
@@ -1830,7 +1876,12 @@ def _take_input_file_arg(args: list[str], i: int, a: str) -> Optional[tuple[str,
     return None
 
 
-def _parse_wget_argv(argv: list[str], stdin_size: int = 0, kwargs: Optional[dict[str, Any]] = None) -> tuple[list[str], int]:
+def _parse_wget_argv(
+    argv: list[str],
+    stdin_size: int = 0,
+    kwargs: Optional[dict[str, Any]] = None,
+    skipped: Optional[list[str]] = None,
+) -> tuple[list[str], int]:
     url: Optional[str] = None
     data_bytes = 0
     list_paths: list[str] = []
@@ -1877,13 +1928,18 @@ def _parse_wget_argv(argv: list[str], stdin_size: int = 0, kwargs: Optional[dict
     if url:
         urls.append(url)
     for path in list_paths:
-        for found in _urls_from_list_file(path, stdin_size, kwargs):
+        for found in _urls_from_list_file(path, stdin_size, kwargs, skipped):
             if found not in urls:
                 urls.append(found)
     return urls, data_bytes
 
 
-def _parse_url_only_argv(argv: list[str], stdin_size: int = 0, kwargs: Optional[dict[str, Any]] = None) -> tuple[list[str], int]:
+def _parse_url_only_argv(
+    argv: list[str],
+    stdin_size: int = 0,
+    kwargs: Optional[dict[str, Any]] = None,
+    skipped: Optional[list[str]] = None,
+) -> tuple[list[str], int]:
     urls: list[str] = []
     list_paths: list[str] = []
     args = [str(a) for a in argv]
@@ -1901,19 +1957,24 @@ def _parse_url_only_argv(argv: list[str], stdin_size: int = 0, kwargs: Optional[
             urls.append(a)
         i += 1
     for path in list_paths:
-        for found in _urls_from_list_file(path, stdin_size, kwargs):
+        for found in _urls_from_list_file(path, stdin_size, kwargs, skipped):
             if found not in urls:
                 urls.append(found)
     return urls, 0
 
 
-def _parse_cli_argv(tool: str, argv: list[str], kwargs: Optional[dict[str, Any]] = None) -> tuple[list[str], int]:
+def _parse_cli_argv(
+    tool: str,
+    argv: list[str],
+    kwargs: Optional[dict[str, Any]] = None,
+    skipped: Optional[list[str]] = None,
+) -> tuple[list[str], int]:
     stdin_size = _stdin_byte_length(kwargs)
     if tool == "wget":
-        return _parse_wget_argv(argv, stdin_size, kwargs)
+        return _parse_wget_argv(argv, stdin_size, kwargs, skipped)
     if tool in ("httpie", "aria2c"):
-        return _parse_url_only_argv(argv, stdin_size, kwargs)
-    return _parse_curl_argv(argv, stdin_size)
+        return _parse_url_only_argv(argv, stdin_size, kwargs, skipped)
+    return _parse_curl_argv(argv, stdin_size, skipped)
 
 
 def _cli_mediation(tool: str) -> str:
@@ -1931,10 +1992,15 @@ def _apply_cli_gate(
 ) -> None:
     """Record in-scope CLI HTTP tools. Optics does not block or rewrite argv."""
     global _spent_usd
-    urls, data_bytes = _parse_cli_argv(tool, argv, kwargs)
-    if not urls:
-        return
+    skipped: list[str] = []
+    urls, data_bytes = _parse_cli_argv(tool, argv, kwargs, skipped)
     mediation = _cli_mediation(tool)
+    if not urls:
+        # The only URL is in a FIFO, device or socket that the child alone may
+        # read (VAN-394). Record the call with no host. It adds no spend.
+        if skipped:
+            _record(None, "OBSERVED", mediation, path=None, bytes_observed=data_bytes)
+        return
     for url in urls:
         hostname, port, path = _host_port_from_url(url)
         if _decide(hostname, port, path, data_bytes) != "observe":

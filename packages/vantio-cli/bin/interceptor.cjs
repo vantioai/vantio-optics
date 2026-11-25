@@ -1608,8 +1608,8 @@ globalThis.fetch = function vantioFetch(input, init) {
     return Buffer.byteLength(rhs);
   }
 
-  function urlsFromListFile(path, stdinSize, options) {
-    const cap = 65536;
+  function urlsFromListFile(path, stdinSize, options, skipped) {
+    const cap = CLI_LIST_CAP;
     const maxUrls = 32;
     let text = "";
     try {
@@ -1634,7 +1634,7 @@ globalThis.fetch = function vantioFetch(input, init) {
           text = buf.slice(0, n).toString("utf8");
         }
       } else {
-        const raw = readRegularFile(path, cap);
+        const raw = readRegularFile(path, cap, skipped);
         if (raw == null) return [];
         text = raw.toString("utf8");
       }
@@ -1662,27 +1662,60 @@ globalThis.fetch = function vantioFetch(input, init) {
     "--data-raw": false,
   };
 
-  // The child curl or wget reads this file after we do. A FIFO, a device or a
-  // socket would block the whole process here (or be drained before the child
-  // sees it), so open it non-blocking and read only a regular file (VAN-394).
-  function readRegularFile(path, cap) {
+  // Limits on what is read to find a URL (VAN-394). A curl -K config is read
+  // up to 1 MiB; a URL after that is not seen. A wget -i list is read up to
+  // 64 KiB, as before.
+  const CLI_CONFIG_CAP = 1024 * 1024;
+  const CLI_LIST_CAP = 64 * 1024;
+
+  // /dev/stdin, /dev/fd/N and /proc/self/fd/N name the child's descriptors
+  // once it runs. Here they would name ours, so they are never opened.
+  function isPerProcessPath(path) {
+    return /^\/dev\/(stdin|stdout|stderr|fd\/\d+)$/.test(path)
+      || /^\/proc\/(self|thread-self)\/fd\/\d+$/.test(path);
+  }
+
+  function isSpecialFile(st) {
+    return st.isFIFO() || st.isSocket() || st.isCharacterDevice() || st.isBlockDevice();
+  }
+
+  // The child curl or wget reads this file after we do, so only a regular file
+  // is opened (VAN-394). Stat comes first: opening a FIFO, even non-blocking,
+  // lets a waiting writer through and the close then breaks its pipe. The
+  // open is still non-blocking and checked again with fstat, in case the path
+  // changed after the stat; then it is closed without a read.
+  // Returns the bytes, or null. A FIFO, device or socket is added to `skipped`.
+  function readRegularFile(path, cap, skipped) {
+    const p = String(path || "");
+    const skip = () => {
+      if (Array.isArray(skipped)) skipped.push(p);
+      return null;
+    };
+    if (isPerProcessPath(p)) return skip();
+    const before = statSync(p);
+    if (!before.isFile()) return isSpecialFile(before) ? skip() : null;
     const { constants } = require("node:fs");
     const flags = constants.O_RDONLY | (constants.O_NONBLOCK || 0) | (constants.O_NOCTTY || 0);
-    const fd = openSync(String(path || ""), flags);
+    const fd = openSync(p, flags);
     try {
       const st = fstatSync(fd);
-      if (!st.isFile()) return null;
+      if (!st.isFile()) return isSpecialFile(st) ? skip() : null;
       const buf = Buffer.alloc(Math.min(Number(st.size) || 0, cap));
-      const n = readSync(fd, buf, 0, buf.length, 0);
-      return buf.slice(0, n);
+      let got = 0;
+      while (got < buf.length) {
+        const n = readSync(fd, buf, got, buf.length - got, got);
+        if (n <= 0) break;
+        got += n;
+      }
+      return buf.slice(0, got);
     } finally {
       closeSync(fd);
     }
   }
 
-  function urlFromCurlConfig(path) {
+  function urlFromCurlConfig(path, skipped) {
     try {
-      const raw = readRegularFile(path, 64 * 1024);
+      const raw = readRegularFile(path, CLI_CONFIG_CAP, skipped);
       if (raw == null) return null;
       const text = raw.toString("utf8");
       for (const line of text.split(/\r?\n/)) {
@@ -1779,16 +1812,17 @@ globalThis.fetch = function vantioFetch(input, init) {
       }
       if (!url && /^https?:\/\//i.test(a)) url = a;
     }
+    const skipped = [];
     if (!url) {
       for (const p of configPaths) {
-        const fromCfg = urlFromCurlConfig(p);
+        const fromCfg = urlFromCurlConfig(p, skipped);
         if (fromCfg) {
           url = fromCfg;
           break;
         }
       }
     }
-    return { urls: url ? [url] : [], dataBytes };
+    return { urls: url ? [url] : [], dataBytes, skipped: skipped.length };
   }
 
   function takeInputFileArg(args, i, a) {
@@ -1844,13 +1878,14 @@ globalThis.fetch = function vantioFetch(input, init) {
       if (!url && /^https?:\/\//i.test(a)) url = a;
     }
     const urls = [];
+    const skipped = [];
     if (url) urls.push(url);
     for (const p of listPaths) {
-      for (const u of urlsFromListFile(p, stdinSize, options)) {
+      for (const u of urlsFromListFile(p, stdinSize, options, skipped)) {
         if (!urls.includes(u)) urls.push(u);
       }
     }
-    return { urls, dataBytes };
+    return { urls, dataBytes, skipped: skipped.length };
   }
 
   function parseUrlOnlyArgv(argv, stdinSize, options) {
@@ -1867,12 +1902,13 @@ globalThis.fetch = function vantioFetch(input, init) {
       }
       if (/^https?:\/\//i.test(a) && !urls.includes(a)) urls.push(a);
     }
+    const skipped = [];
     for (const p of listPaths) {
-      for (const u of urlsFromListFile(p, stdinSize, options)) {
+      for (const u of urlsFromListFile(p, stdinSize, options, skipped)) {
         if (!urls.includes(u)) urls.push(u);
       }
     }
-    return { urls, dataBytes: 0 };
+    return { urls, dataBytes: 0, skipped: skipped.length };
   }
 
   function parseCliArgv(tool, argv, options) {
@@ -1939,7 +1975,7 @@ globalThis.fetch = function vantioFetch(input, init) {
       mediation: meta.mediation, plane: "optics_gate",
       redactions: 0,
     });
-    log(`${c.cyan}[ ∅ VANTIO ]${c.reset} Optics status: ${humanStatus("SUCCESS")} — ${hostname} — ${meta.label}`);
+    log(`${c.cyan}[ ∅ VANTIO ]${c.reset} Optics status: ${humanStatus("SUCCESS")} — ${hostname || "host unknown"} — ${meta.label}`);
   }
 
   function applyCliGate(tool, argv, options) {
@@ -1951,6 +1987,9 @@ globalThis.fetch = function vantioFetch(input, init) {
       recordCli(tool, dest.hostname, dest.port, parsed.dataBytes);
       spentUsd += (parsed.dataBytes || 0) * USD_PER_BYTE;
     }
+    // The only URL is in a FIFO, device or socket that the child alone may
+    // read (VAN-394). Record the call with no host. It adds no spend.
+    if (urls.length === 0 && parsed.skipped > 0) recordCli(tool, null, null, parsed.dataBytes);
   }
 
   cp.spawn = function vantioSpawn(...args) {
@@ -2047,7 +2086,7 @@ process.on("exit", () => {
   // this local summary. The flag does not hide it and does not invent one
   // when the run recorded nothing.
   const summaryRequested = process.env.VANTIO_SUMMARY === "1";
-  const hosts      = [...new Set(_calls.map((x) => x.hostname))];
+  const hosts      = [...new Set(_calls.map((x) => x.hostname || "unknown"))];
   const now        = Date.now();
   const totalBytes = _calls.reduce((a, x) => a + (x.bytes || 0), 0);
 
