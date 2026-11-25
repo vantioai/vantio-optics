@@ -271,10 +271,10 @@ async function runAgent(body, enforce, extraEnv = {}) {
   writeFileSync(agent, `${PRELUDE}\n${body}\ndone()\n`);
   try {
     const args = enforce ? ["run", "--mcp-enforce", "python3", agent] : ["run", "python3", agent];
-    const { code, stdout, stderr } = await runCli(args, { HOME: home, FRAME, ...extraEnv });
+    const { code, stdout, stderr } = await runCli(args, { HOME: home, FRAME, REAL_NODE: process.execPath, ...extraEnv });
     assert.equal(code, 0, stderr);
     const logPath = join(home, ".vantio", "mcp-observations.jsonl");
-    return { out: result(stdout), log: existsSync(logPath) ? readFileSync(logPath, "utf8") : "" };
+    return { out: result(stdout), log: existsSync(logPath) ? readFileSync(logPath, "utf8") : "", stderr };
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
@@ -514,5 +514,234 @@ test("a str written to a binary pipe raises TypeError, as in plain Python", { sk
     assert.equal(out.bytes_on_binary, 5);
     assert.equal(out.str_on_text, 5);
     assert.equal(out.binary_echo, "text\n");
+  }
+});
+
+// Fixes after the independent review of 20db6af (N1, N3, N5, N6, N8).
+// fake_node() puts a `node` first on PATH that notes each start in a file,
+// waits, then runs the real node. The count shows whether the helper ran.
+const FAKE_NODE = String.raw`
+import stat
+def fake_node(delay):
+    d = os.path.join(os.environ["HOME"], "fake-bin")
+    os.makedirs(d, exist_ok=True)
+    count = os.path.join(d, "starts")
+    with open(os.path.join(d, "node"), "w") as fh:
+        fh.write('#!/bin/sh\necho start >> "%s"\nsleep %s\nexec "%s" "$@"\n' % (count, delay, os.environ["REAL_NODE"]))
+    os.chmod(os.path.join(d, "node"), 0o755)
+    os.environ["PATH"] = d + os.pathsep + os.environ["PATH"]
+    return count
+def starts(count):
+    return len(open(count).read().splitlines()) if os.path.exists(count) else 0
+def probe(data):
+    o = piped(data)
+    return {"same": o == data.decode("utf-8", "replace"), "canary": os.environ["CANARY"] in o,
+            "blocked": "vantio_mcp_policy_block" in o, "id7": '"id":7' in o, "after": "after\n" in o}
+`;
+
+// N1.
+const METHOD_KEY_AGENT = String.raw`
+count = fake_node(0)
+nokey = b'{"id":7,"method":"tools/call","params":{"name":"' + os.environ["CANARY"].encode() + b'","arguments":{}}}'
+out["write"] = probe(b"before\n" + nokey + b"\nafter\n")
+o = subprocess.run(["cat"], input=b"before\n" + nokey + b"\nafter\n", capture_output=True).stdout.decode()
+out["run"] = {"canary": os.environ["CANARY"] in o, "blocked": "vantio_mcp_policy_block" in o, "after": "after\n" in o,
+              "same": o == (b"before\n" + nokey + b"\nafter\n").decode()}
+out["batch"] = probe(b"[" + nokey + b"]\nafter\n")
+out["starts_method"] = starts(count)
+neither = b'{"id":7,"params":{"name":"t","arguments":{}}}\n[{"id":8},[{"result":1}]]\n{"Method":1,"JSONRPC":"2.0"}\n{"params":{"method":"tools/call"}}\n'
+n0 = starts(count)
+out["neither_same"] = piped(neither) == neither.decode()
+out["neither_run_same"] = subprocess.run(["cat"], input=neither, capture_output=True).stdout == neither
+out["starts_neither"] = starts(count) - n0
+`;
+
+test("an object with a method key and no jsonrpc key goes to the helper, also inside a batch; --mcp-enforce withholds it", { skip: !HAS_PY, timeout: 120000 }, async () => {
+  const enforce = await runAgent(`${FAKE_NODE}\n${METHOD_KEY_AGENT}`, true, { CANARY });
+  for (const key of ["write", "run", "batch"]) {
+    assert.equal(enforce.out[key].canary, false, `${key} reached the child`);
+    assert.equal(enforce.out[key].blocked, true, key);
+    assert.equal(enforce.out[key].after, true, `${key}: next line`);
+  }
+  assert.equal(enforce.out.write.id7, true, "the error carries the request id");
+  assert.equal(enforce.out.starts_method, 3, "one node start per checked line");
+  assert.match(enforce.log, /"reason":"batch_rejected"/);
+  assert.equal(enforce.log.includes(CANARY), false);
+  // Negative case: an object with neither key passes, and node is not started
+  // (the fake node on PATH notes every start; the count does not move).
+  assert.equal(enforce.out.neither_same, true);
+  assert.equal(enforce.out.neither_run_same, true);
+  assert.equal(enforce.out.starts_neither, 0, "no node start for JSON with neither key");
+
+  const observe = await runAgent(`${FAKE_NODE}\n${METHOD_KEY_AGENT}`, false, { CANARY });
+  for (const key of ["write", "run", "batch"]) assert.equal(observe.out[key].same, true, `observe ${key}: bytes identical`);
+  assert.equal(observe.out.starts_method, 3, "observe sends the same three lines to the helper");
+  assert.equal(observe.log.split("\n").filter((l) => l.includes("tools/call")).length, 2);
+  assert.equal(observe.out.neither_same, true);
+  assert.equal(observe.out.neither_run_same, true);
+  assert.equal(observe.out.starts_neither, 0);
+  assert.equal(observe.log.includes(CANARY), false);
+});
+
+// N6.
+const BROKEN_UTF8_AGENT = String.raw`
+count = fake_node(0)
+shapes = {
+    "c2": b"\xc2" + FRAME,
+    "ff": b"\xff" + FRAME,
+    "e2_80": b"\xe2\x80" + FRAME,
+    "bom_then_ff": b"\xef\xbb\xbf \xff" + FRAME,
+    "deep_batch": b"[" * 10 + FRAME + b"]" * 10,
+}
+for name, line in shapes.items():
+    out[name] = probe(line + b"\nafter\n")
+n0 = starts(count)
+binary = (b"\xff\xd8\xff\xe0 jpeg {x}\n" + b"\xffplain\n" + b"\xc2\xa9 2026 {a}\n" + "é{x\n€[y\n".encode()
+          + b"\xc2 {x\n" + b"\x80\n" + b"[[[[[[[[[[1]]]]]]]]]]\n" + bytes(range(128, 256)) + b"\n")
+out["binary_same"] = piped(binary) == binary.decode("utf-8", "replace")
+out["binary_run_same"] = subprocess.run(["cat"], input=binary, capture_output=True).stdout == binary
+out["starts_binary"] = starts(count) - n0
+out["lone_ff"] = arrives(b"\xff", 1)
+out["ff_then_x"] = arrives(b"\xffx", 2)
+`;
+
+test("--mcp-enforce withholds a frame after a broken UTF-8 byte and a batch nested 10 deep; binary lines still pass", { skip: !HAS_PY, timeout: 120000 }, async () => {
+  const names = ["c2", "ff", "e2_80", "bom_then_ff", "deep_batch"];
+  const enforce = await runAgent(`${FAKE_NODE}\n${BROKEN_UTF8_AGENT}`, true, { CANARY });
+  for (const name of names) {
+    assert.equal(enforce.out[name].canary, false, `${name} reached the child`);
+    assert.equal(enforce.out[name].blocked, true, name);
+    assert.equal(enforce.out[name].after, true, `${name}: next line`);
+  }
+  assert.equal(enforce.log.split("\n").filter((l) => l.includes('"reason":"invalid_utf8"')).length, 4);
+  assert.match(enforce.log, /"reason":"batch_rejected"/);
+  assert.equal(enforce.log.includes(CANARY), false);
+  // Negative case: binary lines that do not have `{` or `[` right after the
+  // broken bytes are unchanged, and node is not started for them.
+  assert.equal(enforce.out.binary_same, true);
+  assert.equal(enforce.out.binary_run_same, true);
+  assert.equal(enforce.out.starts_binary, 0);
+  assert.deepEqual(enforce.out.ff_then_x, [2, 0], "the bytes go on as soon as the next byte is not `{` or `[`");
+
+  const observe = await runAgent(`${FAKE_NODE}\n${BROKEN_UTF8_AGENT}`, false, { CANARY });
+  for (const name of names) assert.equal(observe.out[name].same, true, `observe ${name}: bytes identical`);
+  assert.equal(observe.out.binary_same, true);
+  assert.equal(observe.out.binary_run_same, true);
+  assert.equal(observe.out.starts_binary, 0);
+  assert.equal(observe.out.lone_ff[0], 1, "observe: a lone 0xFF reaches the child at once");
+});
+
+// N3. The fake node waits 2 s, so a child that gets its bytes in under 1.5 s
+// got them before the helper finished.
+const ORDER_AGENT = String.raw`
+count = fake_node(2)
+def timed(bufsize, how, data):
+    p = subprocess.Popen(["cat"], stdin=P, stdout=P, bufsize=bufsize)
+    seen = {}
+    def pump():
+        while True:
+            chunk = os.read(p.stdout.fileno(), 65536)
+            if not chunk:
+                seen["eof"] = time.time()
+                break
+            seen.setdefault("first", time.time())
+    t = threading.Thread(target=pump, daemon=True); t.start()
+    t0 = time.time()
+    p.stdin.write(data)
+    if how == "flush":
+        p.stdin.flush()
+    else:
+        p.stdin.close()
+    call = time.time() - t0
+    p.stdin.close(); t.join(10); p.wait()
+    return {"first": seen["first"] - t0, "eof": seen["eof"] - t0, "call": call}
+line = FRAME + b"\n"
+out["flush"] = timed(-1, "flush", line)
+out["unbuffered"] = timed(0, "flush", line)
+out["close"] = timed(-1, "close", line)
+sink = os.path.join(os.environ["HOME"], "sink")
+p = subprocess.Popen(["sh", "-c", 'cat > "$1"', "sh", sink], stdin=P)
+seen = {}
+def poll():
+    while "first" not in seen:
+        if os.path.exists(sink) and os.path.getsize(sink) > 0:
+            seen["first"] = time.time()
+        time.sleep(0.01)
+t = threading.Thread(target=poll, daemon=True); t.start()
+t0 = time.time()
+p.communicate(b"first\n" + line)
+out["communicate"] = {"call": time.time() - t0, "first": seen.get("first", t0 + 99) - t0}
+out["starts_frames"] = starts(count)
+n0 = starts(count)
+out["plain"] = timed(-1, "flush", b'plain\n{"a":1}\n')
+out["starts_plain"] = starts(count) - n0
+`;
+
+test("observe: the child gets a JSON-RPC line before the helper runs (flush, unbuffered write, close, communicate)", { skip: !HAS_PY, timeout: 120000 }, async () => {
+  const { out, log } = await runAgent(`${FAKE_NODE}\n${ORDER_AGENT}`, false);
+  for (const key of ["flush", "unbuffered", "close", "communicate"]) {
+    assert.ok(out[key].first < 1.5, `${key}: first byte after ${out[key].first}s`);
+    assert.ok(out[key].call >= 1.9, `${key}: the helper still ran inside the call (${out[key].call}s)`);
+  }
+  assert.ok(out.close.eof < 1.5, `close: end of input after ${out.close.eof}s`);
+  assert.equal(out.starts_frames, 4);
+  assert.equal(log.split("\n").filter((l) => l.includes("tools/call")).length, 4, "each frame is still logged");
+  // Negative case: lines that are not JSON-RPC do not start node at all.
+  assert.equal(out.starts_plain, 0);
+  assert.ok(out.plain.call < 1, `plain lines took ${out.plain.call}s`);
+});
+
+// N5.
+const DEVNULL_AGENT = String.raw`
+p = subprocess.Popen(["cat"], stdin=P, stdout=subprocess.DEVNULL)
+p.stdin.write(b"plain\n" + (FRAME + b"\n" if os.environ["SEND_FRAME"] == "1" else b'{"a":1}\n'))
+p.stdin.close(); p.wait()
+`;
+
+test("--mcp-enforce: a frame withheld on stdin.write prints the notice when stdout is not a pipe", { skip: !HAS_PY, timeout: 120000 }, async () => {
+  const NOTICE = /mcp frame withheld \(stdout not captured\)/g;
+  const withheld = await runAgent(DEVNULL_AGENT, true, { SEND_FRAME: "1" });
+  assert.equal((withheld.stderr.match(NOTICE) || []).length, 1, withheld.stderr);
+  assert.equal(withheld.stderr.includes(CANARY), false);
+  // Negative cases: nothing withheld, no notice; observe withholds nothing.
+  const nothing = await runAgent(DEVNULL_AGENT, true, { SEND_FRAME: "0" });
+  assert.equal((nothing.stderr.match(NOTICE) || []).length, 0, nothing.stderr);
+  const observe = await runAgent(DEVNULL_AGENT, false, { SEND_FRAME: "1" });
+  assert.equal((observe.stderr.match(NOTICE) || []).length, 0, observe.stderr);
+});
+
+// N8. The unwrapped method, called through the class, gives plain Python's text.
+const CLOSED_AGENT = String.raw`
+import io
+def closed(kind, item, **kw):
+    p = subprocess.Popen(["cat"], stdin=P, stdout=P, **kw)
+    p.stdin.close()
+    got = {}
+    for name, call in (("wrapped", lambda: p.stdin.writelines([item])), ("python", lambda: kind.writelines(p.stdin, [item])),
+                       ("wrapped_empty", lambda: p.stdin.writelines([]))):
+        try:
+            call(); got[name] = "no error"
+        except ValueError as exc:
+            got[name] = "ValueError: " + str(exc)
+    p.stdout.close(); p.wait()
+    return got
+out["buffered"] = closed(io.BufferedWriter, b"x\n")
+out["unbuffered"] = closed(io.FileIO, b"x\n", bufsize=0)
+out["text"] = closed(io.TextIOWrapper, "x\n", text=True)
+p = subprocess.Popen(["cat"], stdin=P, stdout=P)
+p.stdin.writelines([b"one\n", bytearray(b"two\n")]); p.stdin.close()
+out["open_echo"] = p.stdout.read().decode(); p.wait()
+`;
+
+test("writelines() on a closed stdin raises ValueError with plain Python's text", { skip: !HAS_PY, timeout: 120000 }, async () => {
+  for (const enforce of [false, true]) {
+    const { out } = await runAgent(CLOSED_AGENT, enforce);
+    for (const key of ["buffered", "unbuffered", "text"]) {
+      assert.match(out[key].python, /^ValueError: /, key);
+      assert.equal(out[key].wrapped, out[key].python, key);
+      assert.equal(out[key].wrapped_empty, out[key].python, `${key}: empty list`);
+    }
+    // Negative case: an open stdin is written as before.
+    assert.equal(out.open_echo, "one\ntwo\n");
   }
 });

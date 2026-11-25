@@ -1,13 +1,15 @@
 """MCP stdio awareness for Python children of `vantio run`.
 
 The Node library evaluates a copy of each complete line. This module does
-not listen and does not replace the child process. Observe never changes or
-delays what the child gets. Enforce withholds a blocked line.
+not listen and does not replace the child process. Observe never changes
+what the child gets, and runs the Node helper for a line only after the
+caller's bytes have been handed over. Enforce withholds a blocked line.
 """
 
 from __future__ import annotations
 
 import codecs
+import io
 import json
 import os
 import re
@@ -53,20 +55,23 @@ def install() -> None:
             gate = getattr(self, "_vantio_gate", None)
             pending = self.__dict__.setdefault("_vantio_errors", bytearray())
             # A retry after TimeoutExpired must not send input again.
-            if gate is not None and not getattr(self, "_communication_started", False):
+            first = gate is not None and not getattr(self, "_communication_started", False)
+            if first and gate.enforce:
                 try:
                     input, injected = gate.filter_all(input)
                     pending.extend(injected)
                 except Exception:
-                    if gate.enforce:
-                        # Fail closed: nothing unchecked reaches the child.
-                        input = None if input is None else input[:0]
-                        pending.extend(_fixed_error().encode("utf-8"))
+                    # Fail closed: nothing unchecked reaches the child.
+                    input = None if input is None else input[:0]
+                    pending.extend(_fixed_error().encode("utf-8"))
             self._vantio_raw = True
             try:
                 out, err = super().communicate(input, timeout)
             finally:
                 self._vantio_raw = False
+                if first and not gate.enforce:
+                    # Observe: the child has the input; now read a copy for the log.
+                    gate.after_communicate(input)
             # Errors from earlier stdin.write calls that stdout.read did not return.
             bucket = getattr(self.stdout, "_vantio_inject", None)
             if bucket:
@@ -92,25 +97,32 @@ _WIDE_BLANKS = frozenset(
     for ch in "\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a"
     "\u2028\u2029\u202f\u205f\u3000\ufeff"
 )
-_WIDE_PREFIXES = frozenset(w[:k] for w in _WIDE_BLANKS for k in range(1, len(w)))
 
 
-def _has_jsonrpc(value, depth: int = 0) -> bool:
-    if isinstance(value, dict):
-        return "jsonrpc" in value
-    if isinstance(value, list) and depth < 8:
-        return any(_has_jsonrpc(item, depth + 1) for item in value)
+def _is_rpc(value) -> bool:
+    """An object with a `jsonrpc` or a `method` key, or an array that holds
+    one at any depth. A server that does not check the `jsonrpc` key would
+    still act on a `method`."""
+    stack = [value]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, dict):
+            if "jsonrpc" in item or "method" in item:
+                return True
+        elif isinstance(item, list):
+            stack.extend(item)
     return False
 
 
 def _classify(line: bytes) -> str:
-    """rpc: a JSON-RPC object, or an array (batch) that holds one.
-    plain: any other JSON value. bad: starts like JSON but does not parse."""
+    """rpc: an object with a `jsonrpc` or `method` key, or an array (batch)
+    that holds one. plain: any other JSON value. bad: starts like JSON but
+    does not parse (this includes a line that is not valid UTF-8)."""
     try:
         value = json.loads(line.decode("utf-8"))
     except Exception:  # not UTF-8, not JSON, too deep, too large a number
         return "bad"
-    return "rpc" if _has_jsonrpc(value) else "plain"
+    return "rpc" if _is_rpc(value) else "plain"
 
 
 def _nowhere(_data: bytes) -> None:
@@ -120,15 +132,20 @@ def _nowhere(_data: bytes) -> None:
 class _Gate:
     """Per-child line handling (VAN-393).
 
-    Observe: the child's stdin is never changed or delayed. The caller writes
-    the original data first, and the gate reads a copy to find JSON-RPC lines
-    for the log.
+    Observe: the child's stdin is never changed. The caller writes the
+    original data first, and the gate reads a copy to find JSON-RPC lines.
+    Those lines are queued and go to the Node helper (for the log) after the
+    bytes have been handed over: after a write to an unbuffered or
+    line-buffered pipe, after flush(), after close() and after communicate().
+    The queue is bounded; when it is full the helper runs at once.
 
     Enforce: blanks at the start of a line are forwarded as they arrive. A
     line whose first non-blank byte is `{` or `[` is held from that byte to
-    its newline and parsed as JSON here. JSON that is not JSON-RPC is
-    forwarded without starting node. A JSON-RPC object, a batch, or a line
-    that does not parse goes to the Node helper, which alone decides; a
+    its newline and parsed as JSON here. So is a line where up to 4 bytes of
+    broken UTF-8 come right before the `{` or `[`; those bytes are held with
+    it. JSON that is not JSON-RPC is forwarded without starting node. An
+    object with a `jsonrpc` or `method` key, a batch that holds one, or a
+    line that does not parse goes to the Node helper, which alone decides; a
     blocked line is withheld. Any other line is forwarded as it arrives.
 
     The held part is bounded at _MAX_FRAME, newline included, as in the Node
@@ -146,7 +163,13 @@ class _Gate:
         self.enforce = os.environ.get("VANTIO_MCP_MODE") == "enforce"
         self.state = "start"  # start | pass | json | drop
         self.held = bytearray()  # a `{` or `[` line, at most _MAX_FRAME bytes
-        self.pre = bytearray()  # at most 2 bytes of a possible wide blank
+        # At most 4 bytes at the start of a line that are not ASCII and not
+        # yet a whole character: part of a wide blank, or broken UTF-8.
+        self.pre = bytearray()
+        self.todo = []  # observe: lines waiting for the helper
+        self.todo_bytes = 0
+        self.closing = False
+        self.direct = isinstance(stdin, io.RawIOBase) or bool(getattr(stdin, "line_buffering", False))
         self._decoder = codecs.getincrementaldecoder("utf-8")("surrogatepass")
 
     def _out(self, data: bytes) -> None:
@@ -199,15 +222,17 @@ class _Gate:
                     # _MAX_FRAME bytes and no newline among them. The newline
                     # is not consumed here, so the next line is not touched.
                     self._oversize()
-            elif self.pre:  # start, inside a possible wide blank
-                cand = bytes(self.pre) + data[i : i + 1]
-                if cand in _WIDE_BLANKS:
+            elif self.pre:  # start, after bytes that are not yet a whole character
+                ch = data[i : i + 1]
+                if ch == b"{" or ch == b"[":
+                    # Broken UTF-8 right before a frame: the helper gets the
+                    # whole line and answers invalid_utf8.
+                    self.held.extend(self.pre)
                     self.pre.clear()
-                    out(cand)
+                    self.state = "json"
+                elif ch >= b"\x80" and len(self.pre) < 4:
                     i += 1
-                elif cand in _WIDE_PREFIXES:
-                    self.pre.extend(data[i : i + 1])
-                    i += 1
+                    self._pre_byte(ch, out)
                 else:
                     self.state = "pass"  # the pass branch sends self.pre first
             else:  # start: blanks go to the child at once and are not kept
@@ -219,11 +244,25 @@ class _Gate:
                 ch = data[i : i + 1]
                 if ch == b"{" or ch == b"[":
                     self.state = "json"
-                elif ch in _WIDE_PREFIXES:
-                    self.pre.extend(ch)
+                elif ch >= b"\x80":
                     i += 1
+                    self._pre_byte(ch, out)
                 else:
                     self.state = "pass"
+
+    def _pre_byte(self, ch: bytes, out) -> None:
+        self.pre.extend(ch)
+        cand = bytes(self.pre)
+        try:
+            cand.decode("utf-8")
+        except UnicodeDecodeError:
+            return  # incomplete or broken: the next byte decides
+        self.pre.clear()
+        if cand in _WIDE_BLANKS:
+            out(cand)
+        else:
+            self.pre.extend(cand)
+            self.state = "pass"  # the pass branch sends self.pre first
 
     def flush_tail(self, sink=None) -> None:
         """Stdin is closing: check or forward whatever is still held."""
@@ -278,10 +317,30 @@ class _Gate:
         self.blocked(error if isinstance(error, str) and error else _fixed_error())
 
     def _observe(self, line: bytes) -> None:
+        """Observe: queue a line for the helper. It only logs."""
+        self.todo.append(line)
+        self.todo_bytes += len(line)
+        if len(self.todo) >= 64 or self.todo_bytes >= 4 * _MAX_FRAME:
+            self.drain()
+
+    def drain(self) -> None:
+        """Observe: run the helper for the queued lines. Never raises."""
+        todo, self.todo, self.todo_bytes = self.todo, [], 0
+        for line in todo:
+            try:
+                _log_verdict(_ask(line, self.server_id, self.original))
+            except Exception:
+                pass
+
+    def after_communicate(self, data) -> None:
+        """Observe: communicate() has sent data and closed stdin. Never raises."""
+        if data is not None:
+            self.watch(data)
         try:
-            _log_verdict(_ask(line, self.server_id, self.original))
+            self.flush_tail(_nowhere)
         except Exception:
             pass
+        self.drain()
 
     def watch(self, data) -> None:
         """Observe: read a copy of data the child already has. Never raises."""
@@ -299,18 +358,10 @@ class _Gate:
             _inject(self.proc, error)
 
     def filter_all(self, data) -> tuple:
-        """For communicate(): return (input for the child, injected stdout bytes).
+        """For communicate() in enforce: return (input for the child, injected stdout bytes).
 
         Bytes held from earlier writes are checked first, then data, then the
         tail, because communicate() closes stdin."""
-        if not self.enforce:
-            if data is not None:
-                self.watch(data)
-            try:
-                self.flush_tail(_nowhere)
-            except Exception:
-                pass
-            return data, b""
         if data is None:
             raw = b""
         elif isinstance(data, str):
@@ -349,6 +400,8 @@ def _attach(proc: subprocess.Popen, args: tuple, original) -> None:
         command = args[0]
     orig_write = stdin.write
     orig_close = stdin.close
+    orig_flush = stdin.flush
+    orig_writelines = stdin.writelines
     gate = _Gate(proc, _server_id(command), orig_write, original, stdin)
     proc._vantio_gate = gate  # type: ignore[attr-defined]
 
@@ -359,6 +412,8 @@ def _attach(proc: subprocess.Popen, args: tuple, original) -> None:
             # Observe: the child gets the caller's own data, then a copy is read.
             count = orig_write(data)
             gate.watch(data)
+            if gate.todo and gate.direct:
+                gate.drain()  # this pipe has no buffer: the child has the bytes
             return count
         if gate.text:
             if not isinstance(data, str):
@@ -372,18 +427,43 @@ def _attach(proc: subprocess.Popen, args: tuple, original) -> None:
         return len(raw)
 
     def writelines(lines):
+        orig_writelines([])  # a closed file raises here, with Python's own text
         for item in lines:
             write(item)
 
-    def close():
-        # Always: whatever is held is checked or forwarded before stdin closes.
+    def flush():
         try:
-            gate.flush_tail(None if gate.enforce else _nowhere)
+            return orig_flush()
         finally:
+            if gate.todo and not gate.closing and not getattr(proc, "_vantio_raw", False):
+                gate.drain()
+
+    def close():
+        if getattr(proc, "_vantio_raw", False):
+            return orig_close()  # communicate() does the gate's work itself
+        if gate.enforce:
+            # Whatever is held is checked or forwarded before stdin closes.
+            try:
+                gate.flush_tail(None)
+            finally:
+                orig_close()
+            return
+        # Observe: close first, so the child has every byte and the end of
+        # input, then read the tail and run the helper for the log.
+        gate.closing = True
+        try:
             orig_close()
+        finally:
+            gate.closing = False
+            try:
+                gate.flush_tail(_nowhere)
+            except Exception:
+                pass
+            gate.drain()
 
     stdin.write = write  # type: ignore[method-assign]
     stdin.writelines = writelines  # type: ignore[method-assign]
+    stdin.flush = flush  # type: ignore[method-assign]
     stdin.close = close  # type: ignore[method-assign]
 
 
@@ -391,6 +471,11 @@ def _inject(proc, error: str) -> None:
     """Put the fixed error on the pipe the workload reads. The child keeps the write end."""
     stdout = proc.stdout
     if stdout is None or not hasattr(stdout, "read"):
+        # The same notice as the communicate() path.
+        try:
+            sys.stderr.write("[ ∅ VANTIO ] mcp frame withheld (stdout not captured)\n")
+        except Exception:
+            pass
         return
     bucket = getattr(stdout, "_vantio_inject", None)
     if bucket is None:
