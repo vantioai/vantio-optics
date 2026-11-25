@@ -103,15 +103,17 @@ export function assemble(key) {
 
   function runBuffer(buffer, meta) {
     const framer = createFramer(meta.transport || "stdio");
-    const frames = framer.push(buffer);
-    for (const fr of framer.finish()) frames.push(fr);
     const records = [];
     let session = store.get(meta.serverId);
-    for (const fr of frames) {
-      const out = evaluateFrame(meta, fr);
-      records.push(out.record);
-      session = out.session || session;
-    }
+    const take = (frames) => {
+      for (const fr of frames) {
+        const out = evaluateFrame(meta, fr);
+        records.push(out.record);
+        session = out.session || session;
+      }
+    };
+    take(framer.iterate(buffer));
+    take(framer.finish());
     return { records, session };
   }
 
@@ -162,6 +164,9 @@ export function assemble(key) {
       const framer = createFramer(safe.transport || "stdio");
       const judge = (frames) => {
         for (const fr of frames) {
+          // A line that is not JSON is never logged and changes no session.
+          // Skipping it keeps a CR-dense stream cheap to tap.
+          if (fr.kind === "ignore") continue;
           const out = evaluateFrame(
             { ...safe, policyObject, serverId: safe.serverId || "unspecified", direction: safe.direction || "server_to_client" },
             fr,
@@ -173,7 +178,7 @@ export function assemble(key) {
         readable,
         (chunk) => {
           if (!chunk) return;
-          judge(framer.push(chunk));
+          judge(framer.iterate(chunk));
         },
         () => judge(framer.finish()),
       );
@@ -251,7 +256,7 @@ function gapRecord(meta) {
   const serverId = meta && typeof meta === "object" && typeof meta.serverId === "string" ? meta.serverId : "unspecified";
   return {
     schema: "vantio.mcp_observation.v1",
-    at: new Date().toISOString(),
+    at: nowIso(),
     transport: "stdio",
     direction: "client_to_server",
     server_id: serverId,
@@ -267,11 +272,23 @@ function shouldForward(mode, action) {
   return true;
 }
 
+// One ISO string per millisecond. A CR-dense stream makes a record per line.
+let lastMs = 0;
+let lastIso = "";
+function nowIso() {
+  const now = Date.now();
+  if (now !== lastMs) {
+    lastMs = now;
+    lastIso = new Date(now).toISOString();
+  }
+  return lastIso;
+}
+
 function recordOf(meta, decided) {
   const partial = decided.partial || {};
   const record = {
     schema: "vantio.mcp_observation.v1",
-    at: new Date().toISOString(),
+    at: nowIso(),
     transport: meta.transport || "stdio",
     direction: meta.direction,
     server_id: meta.serverId,

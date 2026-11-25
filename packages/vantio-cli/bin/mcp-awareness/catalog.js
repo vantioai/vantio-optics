@@ -296,11 +296,12 @@ const RPC_NAMES = ["jsonrpc", "method", "id", "params", "result", "error"];
 const PARAM_NAMES = ["name", "arguments"];
 
 function foldedView(node, names) {
+  // Keys keep their own spelling and order, so a walk of `order` still finds
+  // every value (canonNode reads map[key] for each key in order). The folded
+  // names are added as aliases.
   const map = Object.create(null);
   let ambiguous = false;
-  for (const key of node.order) {
-    if (!names.includes(foldKey(key))) map[key] = node.map[key];
-  }
+  for (const key of node.order) map[key] = node.map[key];
   if (node.folds) {
     for (const [name, hit] of node.folds) {
       if (!names.includes(name)) continue;
@@ -323,11 +324,15 @@ export function readEnvelope(value, flags) {
     map.params = { ...map.params, map: inner.map };
   }
   if (view.ambiguous) return { malformed: true, reason: "duplicate_key", dups: true, truncated: flags.truncated === true };
+  // What a truncated request gets is decided in policy.js, per method and per
+  // policy default (see the table in test/mcp-awareness-cr-keycase.test.js).
   // Keys past the key cap are not stored. None of them can change what the
   // policy reads: every key that folds to a name above is counted by the
   // parser, stored or not, so a dropped key is never `method`, `id`, `params`,
   // `name` or `arguments` in any case. A dropped key inside `arguments` makes
-  // a tools/call truncated_shape, which decideCall denies.
+  // a tools/call truncated_shape, which decideCall denies. Other requests with
+  // a truncated shape are not all refused: under default allow a truncated
+  // tools/list, resources/read or prompts/get is forwarded and logged.
   const rpc = str(map.jsonrpc);
   if (rpc != null && rpc !== "2.0") return { malformed: true, dups: flags.dups === true, truncated: flags.truncated === true };
   const method = str(map.method);

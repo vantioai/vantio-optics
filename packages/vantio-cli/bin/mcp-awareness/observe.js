@@ -3,7 +3,7 @@
  * Nothing here listens on a socket or spawns a process.
  */
 
-import { PassThrough, Transform, Writable } from "node:stream";
+import { Readable, Transform, Writable } from "node:stream";
 import { createFramer } from "./parse.js";
 
 export function tapReadable(readable, onChunk, onEnd) {
@@ -70,25 +70,69 @@ function deliver(frames, onFrame, push) {
 export function createStdioPairGate({ fromChild, toChild, onClientFrame, onServerFrame, enforce, onFault }) {
   const clientFramer = createFramer("stdio");
   const serverFramer = createFramer("stdio");
-  const stdout = new PassThrough();
+  const stdout = new Readable({ read() {} });
+  // Without a first read(), a chunk pushed before the first tick waits for it.
+  // A listener added later then gets its data in the same call, as it did when
+  // this was a PassThrough.
+  stdout.read(0);
+  let outEnded = false;
   const queued = [];
   let inboundPartial = false;
-  // Set when the gate itself throws. Enforce: nothing more reaches the child
-  // and one policy error goes back. Observe: the child's bytes pass unchanged.
+  // Set when the gate itself fails. Enforce: nothing more is forwarded, one
+  // record and one policy error are written, and the streams end. Observe:
+  // the bytes already went through; judging goes on for the record.
   let broken = false;
+
+  function outOpen() {
+    return !outEnded && !stdout.destroyed;
+  }
 
   function flushErrors() {
     if (inboundPartial) return;
-    while (queued.length) stdout.write(queued.shift());
+    while (queued.length) emitOut(queued.shift());
   }
 
-  function fault() {
-    broken = true;
+  // A listener on stdout that throws must not make the gate write a byte twice
+  // or stall. push() keeps the chunk before the listener runs, and a Readable
+  // goes on delivering after the throw.
+  function emitOut(raw) {
+    if (!outOpen()) return;
+    try {
+      stdout.push(raw);
+    } catch {
+      if (enforce) {
+        if (!broken) fault();
+        endOut();
+      } else {
+        recordFault();
+      }
+    }
+  }
+
+  function endOut() {
+    if (!outOpen()) return;
+    outEnded = true;
+    try {
+      stdout.push(null);
+    } catch {
+      /* already closing */
+    }
+  }
+
+  let recorded = false;
+  function recordFault() {
+    if (recorded) return;
+    recorded = true;
     try {
       if (onFault) onFault();
     } catch {
       /* the record is best effort; the withhold is not */
     }
+  }
+
+  function fault() {
+    broken = true;
+    recordFault();
     if (enforce) {
       queued.push(
         Buffer.from(
@@ -98,7 +142,8 @@ export function createStdioPairGate({ fromChild, toChild, onClientFrame, onServe
     }
   }
 
-  // Frames that are forwarded are written in runs, in order.
+  // Enforce: frames that are forwarded are written in runs, in order. Frames
+  // come from the framer one at a time, so each is judged before the next is built.
   function accept(frames, onFrame, writeForward) {
     const run = [];
     let runBytes = 0;
@@ -108,6 +153,7 @@ export function createStdioPairGate({ fromChild, toChild, onClientFrame, onServe
       runBytes = 0;
     };
     for (const fr of frames) {
+      if (broken) break;
       let decision;
       try {
         decision = onFrame(fr);
@@ -124,7 +170,18 @@ export function createStdioPairGate({ fromChild, toChild, onClientFrame, onServe
         queued.push(decision.replacement);
       }
     }
-    flush();
+    if (!broken) flush();
+  }
+
+  // Observe: judge for the record only. The decision does not change a byte.
+  function judge(frames, onFrame) {
+    for (const fr of frames) {
+      try {
+        onFrame(fr);
+      } catch {
+        recordFault();
+      }
+    }
   }
 
   function toChildWrite(raw) {
@@ -137,22 +194,37 @@ export function createStdioPairGate({ fromChild, toChild, onClientFrame, onServe
 
   const stdin = new Writable({
     write(chunk, _enc, cb) {
-      if (broken) {
-        if (!enforce) toChildWrite(chunk);
-        flushErrors();
+      if (!enforce) {
+        toChildWrite(chunk);
+        try {
+          judge(clientFramer.iterate(chunk), onClientFrame);
+        } catch {
+          recordFault();
+        }
         cb();
         return;
       }
-      try {
-        accept(clientFramer.push(chunk), onClientFrame, toChildWrite);
-      } catch {
-        fault();
-        if (!enforce) toChildWrite(chunk);
+      if (!broken) {
+        try {
+          accept(clientFramer.iterate(chunk), onClientFrame, toChildWrite);
+        } catch {
+          fault();
+        }
       }
       flushErrors();
+      if (broken) endOut();
       cb();
     },
     final(cb) {
+      if (!enforce) {
+        try {
+          judge(clientFramer.finish(), onClientFrame);
+        } catch {
+          recordFault();
+        }
+        cb();
+        return;
+      }
       if (!broken) {
         try {
           accept(clientFramer.finish(), onClientFrame, toChildWrite);
@@ -161,43 +233,70 @@ export function createStdioPairGate({ fromChild, toChild, onClientFrame, onServe
         }
       }
       flushErrors();
+      if (broken) endOut();
       cb();
     },
   });
 
   function onChild(chunk) {
+    if (!enforce) {
+      emitOut(chunk);
+      try {
+        judge(serverFramer.iterate(chunk), onServerFrame);
+      } catch {
+        recordFault();
+      }
+      return;
+    }
+    if (broken) return;
     try {
-      const frames = serverFramer.push(chunk);
-      inboundPartial = serverFramer.buffered() > 0;
-      accept(frames, onServerFrame, (raw) => stdout.write(raw));
+      accept(serverFramer.iterate(chunk), onServerFrame, emitOut);
     } catch {
-      // Observe: the server's bytes go through as they came. Enforce: withheld.
       fault();
-      if (!enforce) stdout.write(chunk);
     }
     inboundPartial = serverFramer.buffered() > 0;
     flushErrors();
+    if (broken) endOut();
   }
 
-  // The child's last line may have no line end. Judge it like any other.
+  let childDone = false;
+  // The child's last line may have no line end. Judge it like any other, then
+  // end stdout so a reader waiting for `end` is released.
   function onChildEnd() {
+    if (childDone) return;
+    childDone = true;
     try {
-      accept(serverFramer.finish(), onServerFrame, (raw) => stdout.write(raw));
+      if (enforce) {
+        if (!broken) accept(serverFramer.finish(), onServerFrame, emitOut);
+      } else {
+        judge(serverFramer.finish(), onServerFrame);
+      }
     } catch {
-      fault();
+      if (enforce) fault();
+      else recordFault();
     }
     inboundPartial = false;
     flushErrors();
+    endOut();
+  }
+
+  function onChildError(err) {
+    childDone = true;
+    if (outOpen()) stdout.destroy(err);
   }
 
   fromChild.on("data", onChild);
   fromChild.on("end", onChildEnd);
+  fromChild.on("close", onChildEnd);
+  fromChild.on("error", onChildError);
   return {
     stdin,
     stdout,
     close() {
       fromChild.off("data", onChild);
       fromChild.off("end", onChildEnd);
+      fromChild.off("close", onChildEnd);
+      fromChild.off("error", onChildError);
     },
   };
 }
