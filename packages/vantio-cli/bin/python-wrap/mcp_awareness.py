@@ -16,6 +16,8 @@ from pathlib import Path
 
 _HELPER = Path(__file__).resolve().parent.parent / "mcp-awareness-frame.js"
 _LOG_MAX = 1024 * 1024
+# Same bound as the Node library (bin/mcp-awareness/bounds.js MAX_FRAME).
+_MAX_FRAME = 256 * 1024
 
 
 def install() -> None:
@@ -80,6 +82,11 @@ class _Gate:
     not JSON-RPC is forwarded without asking the helper. In observe mode a
     JSON-RPC line is forwarded first and then checked; in enforce mode it is
     checked first and a blocked line is withheld.
+
+    A held line is bounded at _MAX_FRAME, as in the Node library. Past the
+    bound, observe forwards what was held and the rest of the line as it
+    arrives, and logs an oversize gap. Enforce withholds the whole line up to
+    its newline and answers with the fixed error.
     """
 
     def __init__(self, proc, server_id: str, orig_write, original, stdin) -> None:
@@ -89,7 +96,7 @@ class _Gate:
         self.original = original
         self.stdin = stdin
         self.enforce = os.environ.get("VANTIO_MCP_MODE") == "enforce"
-        self.state = "start"  # start | pass | json
+        self.state = "start"  # start | pass | json | drop
         self.held = bytearray()
 
     def _out(self, data: bytes) -> None:
@@ -110,12 +117,25 @@ class _Gate:
                 out(data[i : j + 1])
                 i = j + 1
                 self.state = "start"
-            elif self.state == "json":
+            elif self.state == "drop":
+                # Enforce, oversize line: nothing reaches the child until its newline.
                 j = data.find(b"\n", i)
                 if j < 0:
-                    self.held.extend(data[i:])
                     return
-                self.held.extend(data[i : j + 1])
+                i = j + 1
+                self.state = "start"
+            elif self.state == "json":
+                j = data.find(b"\n", i)
+                end = n if j < 0 else j + 1
+                room = _MAX_FRAME - len(self.held)
+                if end - i > room:
+                    self.held.extend(data[i : i + room + 1])
+                    i += room + 1
+                    self._oversize(out)
+                    continue
+                self.held.extend(data[i:end])
+                if j < 0:
+                    return
                 i = j + 1
                 line = bytes(self.held)
                 self.held.clear()
@@ -141,6 +161,8 @@ class _Gate:
 
     def flush_tail(self, sink=None) -> None:
         out = sink or self._out
+        if self.state == "drop":
+            self.held.clear()
         if self.held:
             tail = bytes(self.held)
             self.held.clear()
@@ -166,6 +188,26 @@ class _Gate:
             self.blocked(error if isinstance(error, str) else str(error))
             return
         out(line)
+
+    def _oversize(self, out) -> None:
+        """The held line passed _MAX_FRAME before its newline."""
+        head = bytes(self.held)
+        self.held.clear()
+        if not self.enforce:
+            out(head)
+            self.state = "pass"
+            self._observe(head)
+            return
+        self.state = "drop"
+        error = None
+        try:
+            verdict = _ask(head, self.server_id, self.original)
+            _log_verdict(verdict)
+            error = verdict.get("error") if isinstance(verdict, dict) else None
+        except Exception:
+            error = None
+        # Fail closed: an oversize line is withheld whatever the helper said.
+        self.blocked(error if isinstance(error, str) and error else _fixed_error())
 
     def _observe(self, line: bytes) -> None:
         try:

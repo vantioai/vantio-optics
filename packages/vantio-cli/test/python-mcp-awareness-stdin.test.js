@@ -135,3 +135,92 @@ print("RESULT " + __import__("json").dumps({"echo": o.decode()}))
     rmSync(home, { recursive: true, force: true });
   }
 });
+
+// A `{` line is held only up to the Node library's MAX_FRAME (256 KiB).
+const BIG_OBSERVE_AGENT = `
+import json, subprocess, threading
+out = {}
+big = b"{" + b"a" * 300000
+p = subprocess.Popen(["cat"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+got = bytearray()
+def pump():
+    while len(got) < len(big):
+        chunk = p.stdout.read1(65536)
+        if not chunk:
+            break
+        got.extend(chunk)
+t = threading.Thread(target=pump, daemon=True); t.start()
+p.stdin.write(big); p.stdin.flush()
+t.join(8)
+out["before_newline"] = len(got)
+p.stdin.write(b"tail\\nnext\\n"); p.stdin.close()
+t.join(8)
+rest = p.stdout.read(); p.wait()
+out["same"] = bytes(got) + rest == big + b"tail\\nnext\\n"
+under = b"{" + b"b" * (256 * 1024 - 2) + b"\\n"
+out["under_same"] = subprocess.run(["cat"], input=under, capture_output=True).stdout == under
+print("RESULT " + json.dumps(out))
+`;
+
+const BIG_ENFORCE_AGENT = `
+import json, os, subprocess
+out = {}
+big = ("{" + '"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"pad":"' + "a" * 300000 + os.environ["CANARY"] + '"}}\\n').encode()
+o = subprocess.run(["cat"], input=b"before\\n" + big + b"after\\n", capture_output=True).stdout.decode()
+out["has_canary"] = os.environ["CANARY"] in o
+out["len"] = len(o)
+out["before"] = "before\\n" in o
+out["after"] = "after\\n" in o
+out["blocked"] = "vantio_mcp_policy_block" in o
+p = subprocess.Popen(["cat"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+p.stdin.write(big[:-1])
+out["held_bytes"] = len(p._vantio_gate.held)
+p.stdin.close()
+o2 = p.stdout.read().decode(); p.wait()  # nothing is forwarded, so cat's pipe cannot fill
+out["no_newline_len"] = len(o2)
+out["no_newline_blocked"] = "vantio_mcp_policy_block" in o2
+print("RESULT " + json.dumps(out))
+`;
+
+test("observe: a `{` line past 256 KiB is forwarded before its newline and logged as an oversize gap", { skip: !HAS_PY, timeout: 60000 }, async () => {
+  const home = mkdtempSync(join(tmpdir(), "van393-big-observe-"));
+  const agent = join(home, "agent.py");
+  writeFileSync(agent, BIG_OBSERVE_AGENT);
+  try {
+    const { code, stdout, stderr } = await runCli(["run", "python3", agent], { HOME: home });
+    assert.equal(code, 0, stderr);
+    const out = result(stdout);
+    assert.equal(out.before_newline, 300001, "the child got the whole oversize part before the newline");
+    assert.equal(out.same, true, "the child's bytes are unchanged");
+    assert.equal(out.under_same, true, "a line under the bound is unchanged");
+    const log = readFileSync(join(home, ".vantio", "mcp-observations.jsonl"), "utf8");
+    assert.match(log, /"reason":"oversize"/);
+    assert.equal(log.split("\n").filter((l) => l.includes('"reason":"oversize"')).length, 1, "one gap, and none for the line under the bound");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("--mcp-enforce withholds a `{` line past 256 KiB up to its newline and answers with the fixed error", { skip: !HAS_PY, timeout: 60000 }, async () => {
+  const home = mkdtempSync(join(tmpdir(), "van393-big-enforce-"));
+  const agent = join(home, "agent.py");
+  writeFileSync(agent, BIG_ENFORCE_AGENT);
+  try {
+    const { code, stdout, stderr } = await runCli(["run", "--mcp-enforce", "python3", agent], { HOME: home, CANARY });
+    assert.equal(code, 0, stderr);
+    const out = result(stdout);
+    assert.equal(out.has_canary, false);
+    assert.ok(out.len < 1024, `child output was ${out.len} bytes`);
+    assert.equal(out.before, true);
+    assert.equal(out.after, true);
+    assert.equal(out.blocked, true);
+    assert.equal(out.held_bytes, 0, "nothing is kept in memory past the bound");
+    assert.ok(out.no_newline_len < 1024, `no-newline output was ${out.no_newline_len} bytes`);
+    assert.equal(out.no_newline_blocked, true);
+    const log = readFileSync(join(home, ".vantio", "mcp-observations.jsonl"), "utf8");
+    assert.match(log, /"reason":"oversize"/);
+    assert.equal(log.includes(CANARY), false);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});

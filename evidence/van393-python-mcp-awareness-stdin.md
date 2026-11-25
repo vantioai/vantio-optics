@@ -42,3 +42,27 @@ Found by an independent review (fresh session) and reproduced here.
 - In observe mode, a JSON-RPC line still costs one `node` check after it's forwarded.
 - CI did not run: the org billing lock (VAN-129). The drift check compares `packages/vantio-cli` with open-core `main`, so this and the mirror go together.
 - Ships only at the next CLI release, with Zach's go.
+
+## Follow-up, Nov 24: a held line is bounded at 256 KiB
+
+Review note on `ef8bb03`: a stdin line that starts with `{` was held until its newline with no size limit (a `cat` child got none of a 301 KB line until `close()`). The Node library stops at `MAX_FRAME` (256 KiB).
+
+Change, in `bin/python-wrap/mcp_awareness.py` only:
+
+- The gate holds at most 256 KiB of a `{` line.
+- Observe: past the bound it forwards what it held and the rest of the line as it arrives, and logs one `oversize` gap.
+- Enforce: past the bound it keeps nothing, withholds the line up to its newline (or `close()`), and answers with the fixed error.
+
+| Command | rc | Result |
+| --- | --- | --- |
+| `node --test test/python-mcp-awareness-stdin.test.js` | 0 | 5 pass (2 new) |
+| The 2 new tests on `ef8bb03`'s wrap | 1 | both fail: the child had 0 bytes before the newline; the gate held 300 067 bytes |
+| Every `ci.yml` JavaScript step, one at a time | 0 each | CLI 185 tests, 184 pass, 1 skipped, 0 fail; optics-mcp 8 pass; agent-sdk 42 pass; lint, typecheck and build rc 0 |
+
+Negative case in the new tests: a `{` line just under the bound reaches the child unchanged and logs no gap.
+
+Gaps:
+
+- In enforce mode a line over 256 KiB that starts with `{` is withheld even when the child is not an MCP server. That is the same rule the Node side uses. The README does not say it yet; that wording is Kate's.
+- VAN-406 (the HTTP side) is not decided. This follows the Node stdio rule, not a new one.
+- CI did not run: the org billing lock (VAN-129). Local runs stand in for it.
