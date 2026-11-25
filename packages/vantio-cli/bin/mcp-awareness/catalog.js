@@ -287,14 +287,52 @@ export function cloneSession(session) {
   };
 }
 
+// A lenient JSON reader (Go's encoding/json, for one) matches a field name in
+// any letter case. Read these keys the same way: `Method` is `method`. The
+// long s (U+017F) is the one non-ASCII letter that folds into a letter of
+// these names. Two keys that fold to one name are ambiguous.
+const RPC_NAMES = ["jsonrpc", "method", "id", "params", "result", "error"];
+const PARAM_NAMES = ["name", "arguments"];
+
+function foldKey(key) {
+  return key.toLowerCase().replace(/\u017f/g, "s");
+}
+
+function foldedView(node, names) {
+  const map = Object.create(null);
+  const seen = new Set();
+  let ambiguous = false;
+  for (const key of node.order) {
+    const folded = foldKey(key);
+    if (!names.includes(folded)) {
+      map[key] = node.map[key];
+    } else if (seen.has(folded)) {
+      ambiguous = true;
+    } else {
+      seen.add(folded);
+      map[folded] = node.map[key];
+    }
+  }
+  return { map, ambiguous };
+}
+
 export function readEnvelope(value, flags) {
   if (!value || value.t === "array") return { batch: true, dups: flags.dups === true, truncated: flags.truncated === true };
   if (value.t !== "object") return { malformed: true, dups: flags.dups === true, truncated: flags.truncated === true };
-  const map = value.map;
+  const view = foldedView(value, RPC_NAMES);
+  const map = view.map;
+  if (map.params && map.params.t === "object") {
+    const inner = foldedView(map.params, PARAM_NAMES);
+    if (inner.ambiguous) view.ambiguous = true;
+    map.params = { ...map.params, map: inner.map };
+  }
+  if (view.ambiguous) {
+    return { malformed: true, ambiguous: true, dups: true, truncated: flags.truncated === true };
+  }
   const rpc = str(map.jsonrpc);
   if (rpc != null && rpc !== "2.0") return { malformed: true, dups: flags.dups === true, truncated: flags.truncated === true };
   const method = str(map.method);
-  const hasId = has(value, "id");
+  const hasId = Object.prototype.hasOwnProperty.call(map, "id");
   let idType = "absent";
   let idNumber;
   let idString;
@@ -312,8 +350,8 @@ export function readEnvelope(value, flags) {
     } else idType = "bad";
   }
   let kind = "malformed";
-  if (has(value, "error")) kind = "error";
-  else if (has(value, "result")) kind = "result";
+  if (Object.prototype.hasOwnProperty.call(map, "error")) kind = "error";
+  else if (Object.prototype.hasOwnProperty.call(map, "result")) kind = "result";
   else if (typeof method === "string" && !hasId) kind = "notification";
   else if (typeof method === "string") kind = "request";
   return {

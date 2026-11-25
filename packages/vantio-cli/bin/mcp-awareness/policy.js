@@ -167,7 +167,7 @@ export function decideEnvelope({ policy, session, direction, envelope, hmacHex }
   const server = policy && policy.servers ? policy.servers[session.serverId] : undefined;
 
   if (!envelope || envelope.batch || envelope.malformed) {
-    findings.push(finding(envelope && envelope.batch ? "batch_rejected" : "malformed_json"));
+    findings.push(finding(envelope && envelope.batch ? "batch_rejected" : envelope && envelope.ambiguous ? "duplicate_key" : "malformed_json"));
     return finish(mode, "GAP", findings, next, envelope, hmacHex, null);
   }
   if (envelope.dups) findings.push(finding("duplicate_key"));

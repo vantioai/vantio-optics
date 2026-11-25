@@ -373,16 +373,31 @@ export function createFramer(transport) {
         if (taken) out.push(taken);
         continue;
       }
-      const nl = buf.indexOf(0x0a);
-      if (nl < 0) {
+      // A line ends at LF, at CRLF, or at a lone CR. A reader that splits on
+      // CR sees a frame after a CR as a line of its own. The raw bytes of each
+      // line keep their CR and LF as they came.
+      const eol = findLineEnd(buf);
+      if (eol < 0) {
         if (end) {
           if (buf.length) out.push(lineFrame(buf));
           buf = Buffer.alloc(0);
         }
         break;
       }
-      const raw = buf.subarray(0, nl + 1);
-      buf = buf.subarray(nl + 1);
+      let cut = eol + 1;
+      if (buf[eol] === 0x0d) {
+        if (cut < buf.length) {
+          if (buf[cut] === 0x0a) cut += 1;
+        } else if (!end) {
+          // A CR is the last byte. A LF may follow in the next chunk, and a
+          // CRLF line must be judged whole. Hold a line that is checked; a
+          // line that is ignored anyway goes on at once.
+          const lone = lineFrame(buf.subarray(0, cut));
+          if (lone.kind !== "ignore") break;
+        }
+      }
+      const raw = buf.subarray(0, cut);
+      buf = buf.subarray(cut);
       out.push(lineFrame(raw));
     }
     return out;
@@ -392,7 +407,7 @@ export function createFramer(transport) {
     let text;
     const decoded = decodeUtf8(raw);
     if (!decoded.ok) return frame("invalid_utf8", raw);
-    text = decoded.text.replace(/\r?\n$/, "");
+    text = decoded.text.replace(/\r?\n$|\r$/, "");
     if (text.length === 0) return frame("ignore", raw, { reason: "empty" });
     const trimmed = text.trimStart();
     if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
@@ -524,6 +539,14 @@ export function createFramer(transport) {
       return buf.length;
     },
   };
+}
+
+function findLineEnd(buffer) {
+  const lf = buffer.indexOf(0x0a);
+  const cr = buffer.indexOf(0x0d);
+  if (lf < 0) return cr;
+  if (cr < 0) return lf;
+  return Math.min(lf, cr);
 }
 
 function startsWithContentLength(buffer) {
