@@ -512,10 +512,18 @@ function noHostNote(noHost) {
   return `Calls with no known host: ${noHost} (listed above, not counted in the summary)`;
 }
 
+// A log written before option A has no `calls_without_host`, and its summary
+// counts a call with no known host. The note "not counted in the summary"
+// would be untrue for it, so it is printed only for a log that has the field.
+function noHostCount(log, calls, counted) {
+  const field = log && log.summary ? log.summary.calls_without_host : undefined;
+  return typeof field === "number" ? calls.length - counted.length : 0;
+}
+
 function generateHtmlReport(log) {
   const calls      = Array.isArray(log.calls) ? log.calls : [];
   const counted    = countedCalls(calls);
-  const noHost     = calls.length - counted.length;
+  const noHost     = noHostCount(log, calls, counted);
   const summary    = log.summary || {};
   const totalCalls = summary.total_calls ?? counted.length;
   const totalBytes = summary.total_bytes ?? counted.reduce((a, c) => a + (c.bytes || 0), 0);
@@ -647,7 +655,8 @@ function proofJson(log) {
     summary: {
       total_calls: log.summary?.total_calls ?? counted.length,
       total_bytes: log.summary?.total_bytes ?? counted.reduce((a, c) => a + (c.bytes || 0), 0),
-      calls_without_host: calls.length - counted.length,
+      // Left out for a log written before option A (see noHostCount).
+      ...(typeof log.summary?.calls_without_host === "number" ? { calls_without_host: calls.length - counted.length } : {}),
       opticsStatus: rollup.opticsStatus,
       applicationStatus: rollup.applicationStatus,
     },
@@ -673,7 +682,7 @@ function publicCall(call) {
 function generateMarkdownReport(log) {
   const calls      = Array.isArray(log.calls) ? log.calls : [];
   const counted    = countedCalls(calls);
-  const noHost     = calls.length - counted.length;
+  const noHost     = noHostCount(log, calls, counted);
   const summary    = log.summary || {};
   const totalCalls = summary.total_calls ?? counted.length;
   const totalBytes = summary.total_bytes ?? counted.reduce((a, c) => a + (c.bytes || 0), 0);
@@ -1246,8 +1255,10 @@ async function searchCommand(args) {
       command: "search",
       query: query || null,
       matches: hits.length,
-      opticsStatus: hits.length ? "SUCCESS" : "NOT_OBSERVED",
-      applicationStatus: rollupCalls(hits.map((hit) => ({ status: hit.httpStatus }))).applicationStatus,
+      // A hit with no known host is listed, but it is not counted for the
+      // status (VAN-394), as in prove and discover.
+      opticsStatus: countedCalls(hits).length ? "SUCCESS" : "NOT_OBSERVED",
+      applicationStatus: rollupCalls(countedCalls(hits).map((hit) => ({ status: hit.httpStatus }))).applicationStatus,
       calls: hits,
     }), null, 2) + "\n");
     return;
@@ -1278,10 +1289,12 @@ function printTailCalls(log, lines, asJson, showAll) {
     process.stdout.write(JSON.stringify(withSchema({
       command: "tail",
       trace_id: log.trace_id || null,
-      total_calls: calls.length,
+      // Same counting rule as prove and discover (VAN-394): a call with no
+      // known host is listed in `calls`, but it is not counted here.
+      total_calls: countedCalls(calls).length,
       shown: shown.length,
-      opticsStatus: rollupCalls(slice).opticsStatus,
-      applicationStatus: rollupCalls(slice).applicationStatus,
+      opticsStatus: rollupCalls(countedCalls(slice)).opticsStatus,
+      applicationStatus: rollupCalls(countedCalls(slice)).applicationStatus,
       calls: shown,
     }), null, 2) + "\n");
     return shown.length;

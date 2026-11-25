@@ -1,0 +1,2998 @@
+{
+ "note": "VAN-394 differential fixture. See test/van394-shapes.test.js.",
+ "files": {
+  "empty": {
+   "text": ""
+  },
+  "body": {
+   "text": "{}"
+  },
+  "cfg-https": {
+   "text": "url = \"https://api.openai.com/v1/c\"\n"
+  },
+  "cfg-plain": {
+   "text": "url = https://api.openai.com/v1\n"
+  },
+  "cfg-bare": {
+   "text": "url = api.openai.com/v1\n"
+  },
+  "cfg-other": {
+   "text": "url = \"https://example.com/a\"\n"
+  },
+  "cfg-two": {
+   "text": "url = \"https://example.com/a\"\nurl = \"https://api.openai.com/v1/b\"\n"
+  },
+  "cfg-ua": {
+   "text": "user-agent = \"api.openai.com\"\nurl = \"http://example.com/\"\n"
+  },
+  "cfg-output": {
+   "text": "output = api.openai.com\nurl = \"http://example.com/\"\n"
+  },
+  "cfg-header": {
+   "text": "header = \"Host: api.openai.com\"\nurl = \"http://example.com/\"\n"
+  },
+  "cfg-data": {
+   "text": "data = api.openai.com/v1\nurl = \"http://example.com/\"\n"
+  },
+  "cfg-o": {
+   "text": "-o api.openai.com\nurl = \"http://example.com/\"\n"
+  },
+  "cfg-urlquery": {
+   "text": "url-query = api.openai.com\nurl = \"http://example.com/\"\n"
+  },
+  "cfg-bom": {
+   "text": "\ufeffurl = \"https://api.openai.com/v1\"\n"
+  },
+  "cfg-cr": {
+   "text": "user-agent = \"x\rurl = https://api.openai.com/v1\"\nurl = \"http://example.com/\"\n"
+  },
+  "cfg-vt": {
+   "text": "user-agent = \"x\u000burl = https://api.openai.com/v1\"\nurl = \"http://example.com/\"\n"
+  },
+  "cfg-nel": {
+   "text": "user-agent = \"x\u0085url = https://api.openai.com/v1\"\nurl = \"http://example.com/\"\n"
+  },
+  "cfg-ls": {
+   "text": "user-agent = \"x\u2028url = https://api.openai.com/v1\"\nurl = \"http://example.com/\"\n"
+  },
+  "cfg-nested": {
+   "text": "config = \"{dir}/cfg-https\"\nurl = \"http://example.com/\"\n"
+  },
+  "cfg-upper": {
+   "text": "URL = \"https://api.openai.com/v1\"\n"
+  },
+  "cfg-single": {
+   "text": "url = 'https://api.openai.com/v1'\n"
+  },
+  "cfg-crlf": {
+   "text": "# c\r\nurl = \"https://api.openai.com/v1\"\r\n"
+  },
+  "cfg-comment": {
+   "text": "# url = \"https://api.openai.com/v1\"\n"
+  },
+  "cfg-big-none": {
+   "repeat": "# pad\n",
+   "times": 180000
+  },
+  "cfg-big-early": {
+   "text": "url = \"https://api.openai.com/v1/early\"\n",
+   "repeat": "# pad\n",
+   "times": 180000
+  },
+  "cfg-big-late": {
+   "repeat": "# pad\n",
+   "times": 180000,
+   "then": "url = \"https://api.openai.com/v1/late\"\n"
+  },
+  "list-https": {
+   "text": "https://api.openai.com/v1/l\n"
+  },
+  "list-bare": {
+   "text": "api.openai.com/v1/l\n"
+  },
+  "list-two": {
+   "text": "https://example.com/x\nhttps://api.openai.com/v1/l\n"
+  },
+  "list-other": {
+   "text": "https://example.com/x\n"
+  },
+  "list-crlf": {
+   "text": "# c\r\nhttps://api.openai.com/v1/l\r\n"
+  },
+  "list-comment": {
+   "text": "# https://api.openai.com/v1/l\n"
+  },
+  "list-big-none": {
+   "repeat": "# pad\n",
+   "times": 12000
+  },
+  "list-big-early": {
+   "text": "https://api.openai.com/v1/early\n",
+   "repeat": "# pad\n",
+   "times": 12000
+  },
+  "list-big-late": {
+   "repeat": "# pad\n",
+   "times": 12000,
+   "then": "https://api.openai.com/v1/late\n"
+  },
+  "fifo": {
+   "fifo": true
+  },
+  "lnk-fifo": {
+   "symlink": "{dir}/fifo"
+  },
+  "socket": {
+   "socket": true
+  },
+  "dir": {
+   "dir": true
+  }
+ },
+ "shapes": [
+  {
+   "id": "c001",
+   "tool": "curl",
+   "argv": [
+    "https://api.openai.com/v1/chat"
+   ]
+  },
+  {
+   "id": "c002",
+   "tool": "curl",
+   "argv": [
+    "http://api.openai.com/"
+   ]
+  },
+  {
+   "id": "c003",
+   "tool": "curl",
+   "argv": [
+    "-s",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c004",
+   "tool": "curl",
+   "argv": [
+    "-sS",
+    "-X",
+    "POST",
+    "https://api.openai.com/v1",
+    "-H",
+    "Content-Type: application/json",
+    "-d",
+    "{}"
+   ]
+  },
+  {
+   "id": "c005",
+   "tool": "curl",
+   "argv": [
+    "-X",
+    "POST",
+    "-H",
+    "Authorization: Bearer x",
+    "-d",
+    "@{dir}/body",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c006",
+   "tool": "curl",
+   "argv": [
+    "https://api.openai.com/v1",
+    "-o",
+    "out.json"
+   ]
+  },
+  {
+   "id": "c007",
+   "tool": "curl",
+   "argv": [
+    "-o",
+    "out.json",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c008",
+   "tool": "curl",
+   "argv": [
+    "--url",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c009",
+   "tool": "curl",
+   "argv": [
+    "--url=https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c010",
+   "tool": "curl",
+   "argv": [
+    "-url",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c011",
+   "tool": "curl",
+   "argv": [
+    "--url",
+    "api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c012",
+   "tool": "curl",
+   "argv": [
+    "api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c013",
+   "tool": "curl",
+   "argv": [
+    "HTTPS://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c014",
+   "tool": "curl",
+   "argv": [
+    "https://api.openai.com:443/v1"
+   ]
+  },
+  {
+   "id": "c015",
+   "tool": "curl",
+   "argv": [
+    "https://llm.example.test/v1"
+   ]
+  },
+  {
+   "id": "c016",
+   "tool": "curl",
+   "argv": [
+    "-H",
+    "Host: x",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c017",
+   "tool": "curl",
+   "argv": [
+    "--compressed",
+    "-sS",
+    "https://api.openai.com/v1/models"
+   ]
+  },
+  {
+   "id": "c018",
+   "tool": "curl",
+   "argv": [
+    "-u",
+    "user:pass",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c019",
+   "tool": "curl",
+   "argv": [
+    "-A",
+    "agent",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c020",
+   "tool": "curl",
+   "argv": [
+    "-x",
+    "socks5h://127.0.0.1:9",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c021",
+   "tool": "curl",
+   "argv": [
+    "-d",
+    "x",
+    "https://api.openai.com/v1",
+    "--next",
+    "https://example.com/a"
+   ]
+  },
+  {
+   "id": "c022",
+   "tool": "curl",
+   "argv": [
+    "https://example.com/a",
+    "--next",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c023",
+   "tool": "curl",
+   "argv": [
+    "--",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c024",
+   "tool": "curl",
+   "argv": [
+    "-d",
+    "x",
+    "--",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c025",
+   "tool": "curl",
+   "argv": [
+    "--data-urlencode",
+    "q=x",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c026",
+   "tool": "curl",
+   "argv": [
+    "-XPOST",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c027",
+   "tool": "curl",
+   "argv": [
+    "-HContent-Type:x",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c028",
+   "tool": "curl",
+   "argv": [
+    "https://api.openai.com/v1?x=1#frag"
+   ]
+  },
+  {
+   "id": "c029",
+   "tool": "curl",
+   "argv": [
+    "--resolve",
+    "api.openai.com:443:127.0.0.1",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c030",
+   "tool": "curl",
+   "argv": [
+    "-v",
+    "-I",
+    "--http2",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c031",
+   "tool": "curl",
+   "argv": [
+    "--json",
+    "{}",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c032",
+   "tool": "curl",
+   "argv": [
+    "-d",
+    "@-",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c033",
+   "tool": "curl",
+   "argv": [
+    "-fsSL",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c034",
+   "tool": "curl",
+   "argv": [
+    "-L",
+    "--max-time",
+    "30",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c035",
+   "tool": "curl",
+   "argv": [
+    "-w",
+    "%{http_code}",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c036",
+   "tool": "curl",
+   "argv": [
+    "--data-binary",
+    "@{dir}/body",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c037",
+   "tool": "curl",
+   "argv": [
+    "-F",
+    "file=@{dir}/body",
+    "https://api.openai.com/v1/files"
+   ]
+  },
+  {
+   "id": "c038",
+   "tool": "curl",
+   "argv": [
+    "--form-string",
+    "a=b",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c039",
+   "tool": "curl",
+   "argv": [
+    "-T",
+    "{dir}/body",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c040",
+   "tool": "curl",
+   "argv": [
+    "https://user:pw@api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c041",
+   "tool": "curl",
+   "argv": [
+    "https://api.anthropic.com/v1/messages",
+    "-H",
+    "x-api-key: k"
+   ]
+  },
+  {
+   "id": "c042",
+   "tool": "curl",
+   "argv": [
+    "https://example.com/a",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c043",
+   "tool": "curl",
+   "argv": [
+    "https://api.openai.com/v1",
+    "https://example.com/a"
+   ]
+  },
+  {
+   "id": "c044",
+   "tool": "curl",
+   "argv": [
+    "https://example.com/a",
+    "--url",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c045",
+   "tool": "curl",
+   "argv": [
+    "--url",
+    "https://api.openai.com/v1",
+    "https://example.com/a"
+   ]
+  },
+  {
+   "id": "c046",
+   "tool": "curl",
+   "argv": [
+    "--url",
+    "https://api.openai.com/v1",
+    "--url",
+    "https://example.com/a"
+   ]
+  },
+  {
+   "id": "c047",
+   "tool": "curl",
+   "argv": [
+    "--url",
+    "https://example.com/a",
+    "--url",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c048",
+   "tool": "curl",
+   "argv": [
+    "--url=https://example.com/a",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c049",
+   "tool": "curl",
+   "argv": [
+    "https://api.openai.com/v1",
+    "--url=https://example.com/a"
+   ]
+  },
+  {
+   "id": "c050",
+   "tool": "curl",
+   "argv": [
+    "-sSL",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c051",
+   "tool": "curl",
+   "argv": [
+    "-sSo",
+    "out.txt",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c052",
+   "tool": "curl",
+   "argv": [
+    "-sSLo",
+    "out.txt",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c053",
+   "tool": "curl",
+   "argv": [
+    "-sSd",
+    "x",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c054",
+   "tool": "curl",
+   "argv": [
+    "-sSLX",
+    "POST",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c055",
+   "tool": "curl",
+   "argv": [
+    "-d",
+    "x",
+    "https://api.openai.com/v1",
+    "-d",
+    "y"
+   ]
+  },
+  {
+   "id": "c056",
+   "tool": "curl",
+   "argv": [
+    "-s",
+    "-S",
+    "-L",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c057",
+   "tool": "curl",
+   "argv": [
+    "-e",
+    "https://api.openai.com/v1",
+    "http://example.com"
+   ]
+  },
+  {
+   "id": "c058",
+   "tool": "curl",
+   "argv": [
+    "http://example.com",
+    "-e",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c059",
+   "tool": "curl",
+   "argv": [
+    "http://example.com",
+    "-A",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c060",
+   "tool": "curl",
+   "argv": [
+    "-A",
+    "https://api.openai.com/v1",
+    "http://example.com"
+   ]
+  },
+  {
+   "id": "c061",
+   "tool": "curl",
+   "argv": [
+    "-o",
+    "https://api.openai.com/v1",
+    "http://example.com"
+   ]
+  },
+  {
+   "id": "c062",
+   "tool": "curl",
+   "argv": [
+    "http://example.com",
+    "-o",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c063",
+   "tool": "curl",
+   "argv": [
+    "-H",
+    "X-Y: https://api.openai.com/v1",
+    "http://example.com"
+   ]
+  },
+  {
+   "id": "c064",
+   "tool": "curl",
+   "argv": [
+    "http://example.com",
+    "-H",
+    "Referer: https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c065",
+   "tool": "curl",
+   "argv": [
+    "--referer=https://api.openai.com/v1",
+    "https://example.com/a"
+   ]
+  },
+  {
+   "id": "c066",
+   "tool": "curl",
+   "argv": [
+    "https://example.com/a",
+    "--referer",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c067",
+   "tool": "curl",
+   "argv": [
+    "http://example.com",
+    "-w",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c068",
+   "tool": "curl",
+   "argv": [
+    "http://example.com",
+    "--doh-url",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c069",
+   "tool": "curl",
+   "argv": [
+    "-x",
+    "https://api.openai.com/v1",
+    "http://example.com"
+   ]
+  },
+  {
+   "id": "c070",
+   "tool": "curl",
+   "argv": [
+    "-sS",
+    "-e",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c071",
+   "tool": "curl",
+   "argv": [
+    "-e",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c072",
+   "tool": "curl",
+   "argv": [
+    "-A",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c073",
+   "tool": "curl",
+   "argv": [
+    "-o",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c074",
+   "tool": "curl",
+   "argv": [
+    "-H",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c075",
+   "tool": "curl",
+   "argv": [
+    "-e",
+    "https://api.openai.com/v1",
+    "--next",
+    "http://example.com"
+   ]
+  },
+  {
+   "id": "c076",
+   "tool": "curl",
+   "argv": [
+    "example.com",
+    "api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c077",
+   "tool": "curl",
+   "argv": [
+    "-o",
+    "api.openai.com",
+    "example.com"
+   ]
+  },
+  {
+   "id": "c078",
+   "tool": "curl",
+   "argv": [
+    "-sSLo",
+    "api.openai.com",
+    "example.com"
+   ]
+  },
+  {
+   "id": "c079",
+   "tool": "curl",
+   "argv": [
+    "-H",
+    "api.openai.com",
+    "example.com"
+   ]
+  },
+  {
+   "id": "c080",
+   "tool": "curl",
+   "argv": [
+    "--user-agent",
+    "api.openai.com",
+    "example.com"
+   ]
+  },
+  {
+   "id": "c081",
+   "tool": "curl",
+   "argv": [
+    "-d",
+    "x",
+    "api.openai.com/v1/chat"
+   ]
+  },
+  {
+   "id": "c082",
+   "tool": "curl",
+   "argv": [
+    "--proto-default",
+    "https",
+    "api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c083",
+   "tool": "curl",
+   "argv": [
+    "--no-buffer",
+    "api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c084",
+   "tool": "curl",
+   "argv": [
+    "--next",
+    "api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c085",
+   "tool": "curl",
+   "argv": [
+    "-h",
+    "api.openai.com"
+   ]
+  },
+  {
+   "id": "c086",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-https"
+   ]
+  },
+  {
+   "id": "c087",
+   "tool": "curl",
+   "argv": [
+    "--config",
+    "{dir}/cfg-https"
+   ]
+  },
+  {
+   "id": "c088",
+   "tool": "curl",
+   "argv": [
+    "--config={dir}/cfg-https"
+   ]
+  },
+  {
+   "id": "c089",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-plain",
+    "-s"
+   ]
+  },
+  {
+   "id": "c090",
+   "tool": "curl",
+   "argv": [
+    "-s",
+    "-K",
+    "{dir}/cfg-https",
+    "-o",
+    "/dev/null"
+   ]
+  },
+  {
+   "id": "c091",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-https",
+    "-K",
+    "{dir}/cfg-other"
+   ]
+  },
+  {
+   "id": "c092",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-other",
+    "-K",
+    "{dir}/cfg-https"
+   ]
+  },
+  {
+   "id": "c093",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-two"
+   ]
+  },
+  {
+   "id": "c094",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/missing",
+    "-K",
+    "{dir}/cfg-https"
+   ]
+  },
+  {
+   "id": "c095",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-https",
+    "-d",
+    "x"
+   ]
+  },
+  {
+   "id": "c096",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-https",
+    "https://example.com/a"
+   ]
+  },
+  {
+   "id": "c097",
+   "tool": "curl",
+   "argv": [
+    "https://example.com/a",
+    "-K",
+    "{dir}/cfg-https"
+   ]
+  },
+  {
+   "id": "c098",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-https",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c099",
+   "tool": "curl",
+   "argv": [
+    "https://api.openai.com/v1",
+    "-K",
+    "{dir}/cfg-other"
+   ]
+  },
+  {
+   "id": "c100",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-other",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c101",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-bare"
+   ]
+  },
+  {
+   "id": "c102",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-ua"
+   ]
+  },
+  {
+   "id": "c103",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-output"
+   ]
+  },
+  {
+   "id": "c104",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-header"
+   ]
+  },
+  {
+   "id": "c105",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-data"
+   ]
+  },
+  {
+   "id": "c106",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-o"
+   ]
+  },
+  {
+   "id": "c107",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-urlquery"
+   ]
+  },
+  {
+   "id": "c108",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-bom"
+   ]
+  },
+  {
+   "id": "c109",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-cr"
+   ]
+  },
+  {
+   "id": "c110",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-vt"
+   ]
+  },
+  {
+   "id": "c111",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-nel"
+   ]
+  },
+  {
+   "id": "c112",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-ls"
+   ]
+  },
+  {
+   "id": "c113",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-nested"
+   ]
+  },
+  {
+   "id": "c114",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-upper"
+   ]
+  },
+  {
+   "id": "c115",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-single"
+   ]
+  },
+  {
+   "id": "c116",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-crlf"
+   ]
+  },
+  {
+   "id": "c117",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/empty"
+   ]
+  },
+  {
+   "id": "c118",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-comment"
+   ]
+  },
+  {
+   "id": "c119",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-https",
+    "--url",
+    "https://example.com/a"
+   ]
+  },
+  {
+   "id": "c120",
+   "tool": "curl",
+   "argv": [
+    "--url",
+    "https://example.com/a",
+    "-K",
+    "{dir}/cfg-https"
+   ]
+  },
+  {
+   "id": "c121",
+   "tool": "curl",
+   "argv": [
+    "--url",
+    "",
+    "-K",
+    "{dir}/cfg-https"
+   ]
+  },
+  {
+   "id": "c122",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-https",
+    "-K",
+    "{dir}/cfg-https"
+   ]
+  },
+  {
+   "id": "c123",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-big-early"
+   ]
+  },
+  {
+   "id": "c124",
+   "tool": "curl",
+   "argv": [
+    "-sK",
+    "{dir}/cfg-https"
+   ]
+  },
+  {
+   "id": "c125",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-other",
+    "example.com"
+   ]
+  },
+  {
+   "id": "c126",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-https",
+    "--next",
+    "https://example.com/a"
+   ]
+  },
+  {
+   "id": "c127",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-other",
+    "--",
+    "x"
+   ]
+  },
+  {
+   "id": "c128",
+   "tool": "curl",
+   "argv": [
+    "--config",
+    "{dir}/cfg-https",
+    "--config={dir}/cfg-other"
+   ]
+  },
+  {
+   "id": "c129",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/empty",
+    "http://example.com"
+   ]
+  },
+  {
+   "id": "c130",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/empty",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "c131",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/empty"
+   ]
+  },
+  {
+   "id": "c132",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/missing"
+   ]
+  },
+  {
+   "id": "c133",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/missing",
+    "http://example.com"
+   ]
+  },
+  {
+   "id": "c134",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/missing",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "w135",
+   "tool": "wget",
+   "argv": [
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "w136",
+   "tool": "wget",
+   "argv": [
+    "-q",
+    "-O",
+    "-",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "w137",
+   "tool": "wget",
+   "argv": [
+    "-i",
+    "{dir}/list-https"
+   ]
+  },
+  {
+   "id": "w138",
+   "tool": "wget",
+   "argv": [
+    "--input-file={dir}/list-https"
+   ]
+  },
+  {
+   "id": "w139",
+   "tool": "wget",
+   "argv": [
+    "--input-file",
+    "{dir}/list-https"
+   ]
+  },
+  {
+   "id": "w140",
+   "tool": "wget",
+   "argv": [
+    "-i",
+    "{dir}/list-https",
+    "https://example.com/a"
+   ]
+  },
+  {
+   "id": "w141",
+   "tool": "wget",
+   "argv": [
+    "https://example.com/a",
+    "-i",
+    "{dir}/list-https"
+   ]
+  },
+  {
+   "id": "w142",
+   "tool": "wget",
+   "argv": [
+    "-i",
+    "{dir}/list-other",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "w143",
+   "tool": "wget",
+   "argv": [
+    "--post-data=x",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "w144",
+   "tool": "wget",
+   "argv": [
+    "--post-file",
+    "{dir}/body",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "w145",
+   "tool": "wget",
+   "argv": [
+    "-i",
+    "{dir}/list-bare"
+   ]
+  },
+  {
+   "id": "w146",
+   "tool": "wget",
+   "argv": [
+    "-i",
+    "{dir}/list-two"
+   ]
+  },
+  {
+   "id": "w147",
+   "tool": "wget",
+   "argv": [
+    "-i",
+    "{dir}/list-other"
+   ]
+  },
+  {
+   "id": "w148",
+   "tool": "wget",
+   "argv": [
+    "-i",
+    "{dir}/list-crlf"
+   ]
+  },
+  {
+   "id": "w149",
+   "tool": "wget",
+   "argv": [
+    "-i",
+    "{dir}/list-comment"
+   ]
+  },
+  {
+   "id": "w150",
+   "tool": "wget",
+   "argv": [
+    "-i",
+    "{dir}/missing"
+   ]
+  },
+  {
+   "id": "w151",
+   "tool": "wget",
+   "argv": [
+    "-i",
+    "{dir}/list-big-early"
+   ]
+  },
+  {
+   "id": "w152",
+   "tool": "wget",
+   "argv": [
+    "api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "w153",
+   "tool": "wget",
+   "argv": [
+    "-i",
+    "{dir}/list-https",
+    "-i",
+    "{dir}/list-other"
+   ]
+  },
+  {
+   "id": "w154",
+   "tool": "wget",
+   "argv": [
+    "-i",
+    "{dir}/list-other",
+    "-i",
+    "{dir}/list-https"
+   ]
+  },
+  {
+   "id": "w155",
+   "tool": "wget",
+   "argv": [
+    "-i",
+    "{dir}/empty"
+   ]
+  },
+  {
+   "id": "w156",
+   "tool": "wget",
+   "argv": [
+    "-i",
+    "{dir}/empty",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "w157",
+   "tool": "wget",
+   "argv": [
+    "-i",
+    "{dir}/empty",
+    "https://example.com/a"
+   ]
+  },
+  {
+   "id": "w158",
+   "tool": "wget",
+   "argv": [
+    "--body-data=x",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "w159",
+   "tool": "wget",
+   "argv": [
+    "-O",
+    "-",
+    "https://api.openai.com/v1",
+    "-i",
+    "{dir}/list-https"
+   ]
+  },
+  {
+   "id": "a160",
+   "tool": "aria2c",
+   "argv": [
+    "-i",
+    "{dir}/list-https"
+   ]
+  },
+  {
+   "id": "a161",
+   "tool": "aria2c",
+   "argv": [
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "a162",
+   "tool": "aria2c",
+   "argv": [
+    "api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "a163",
+   "tool": "aria2c",
+   "argv": [
+    "--input-file={dir}/list-https"
+   ]
+  },
+  {
+   "id": "a164",
+   "tool": "aria2c",
+   "argv": [
+    "-i",
+    "{dir}/list-other",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "a165",
+   "tool": "aria2c",
+   "argv": [
+    "-i",
+    "{dir}/list-two"
+   ]
+  },
+  {
+   "id": "a166",
+   "tool": "aria2c",
+   "argv": [
+    "-i",
+    "{dir}/missing"
+   ]
+  },
+  {
+   "id": "a167",
+   "tool": "aria2c",
+   "argv": [
+    "-i",
+    "{dir}/empty"
+   ]
+  },
+  {
+   "id": "a168",
+   "tool": "aria2c",
+   "argv": [
+    "https://example.com/a",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "a169",
+   "tool": "aria2c",
+   "argv": [
+    "-i",
+    "{dir}/list-bare"
+   ]
+  },
+  {
+   "id": "h170",
+   "tool": "http",
+   "argv": [
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "h171",
+   "tool": "http",
+   "argv": [
+    "POST",
+    "https://api.openai.com/v1",
+    "a=b"
+   ]
+  },
+  {
+   "id": "h172",
+   "tool": "http",
+   "argv": [
+    "https://example.com/a",
+    "https://api.openai.com/v1"
+   ]
+  },
+  {
+   "id": "h173",
+   "tool": "http",
+   "argv": [
+    "-i",
+    "{dir}/list-https"
+   ]
+  },
+  {
+   "id": "h174",
+   "tool": "http",
+   "argv": [
+    "api.openai.com/v1"
+   ]
+  }
+ ],
+ "special": [
+  {
+   "id": "s001",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/fifo"
+   ],
+   "hosts": [
+    null
+   ],
+   "why": "main reads the file; it is skipped, no URL found: one call, no host"
+  },
+  {
+   "id": "s002",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/lnk-fifo"
+   ],
+   "hosts": [
+    null
+   ],
+   "why": "a link to a FIFO is a FIFO: main reads the file; it is skipped, no URL found: one call, no host"
+  },
+  {
+   "id": "s003",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/socket"
+   ],
+   "hosts": [
+    null
+   ],
+   "why": "a socket: main reads the file; it is skipped, no URL found: one call, no host"
+  },
+  {
+   "id": "s004",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/dir"
+   ],
+   "hosts": [],
+   "why": "a directory is not read and not marked: nothing, as for a missing file"
+  },
+  {
+   "id": "s005",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "/dev/stdin"
+   ],
+   "hosts": [
+    null
+   ],
+   "why": "/dev/stdin names the child's stdin: main reads the file; it is skipped, no URL found: one call, no host"
+  },
+  {
+   "id": "s006",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "/dev/null"
+   ],
+   "hosts": [
+    null
+   ],
+   "why": "a character device: main reads the file; it is skipped, no URL found: one call, no host"
+  },
+  {
+   "id": "s007",
+   "tool": "curl",
+   "argv": [
+    "--config",
+    "{dir}/fifo"
+   ],
+   "hosts": [
+    null
+   ],
+   "why": "main reads the file; it is skipped, no URL found: one call, no host"
+  },
+  {
+   "id": "s008",
+   "tool": "curl",
+   "argv": [
+    "--config={dir}/fifo"
+   ],
+   "hosts": [
+    null
+   ],
+   "why": "main reads the file; it is skipped, no URL found: one call, no host"
+  },
+  {
+   "id": "s009",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/fifo",
+    "-d",
+    "abc"
+   ],
+   "hosts": [
+    null
+   ],
+   "why": "main reads the file; it is skipped, no URL found: one call, no host"
+  },
+  {
+   "id": "s010",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/fifo",
+    "https://api.openai.com/v1"
+   ],
+   "hosts": [
+    "api.openai.com"
+   ],
+   "why": "a URL with a scheme is on the command line: main never reads the config"
+  },
+  {
+   "id": "s011",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/fifo",
+    "http://example.com"
+   ],
+   "hosts": [],
+   "why": "a URL with a scheme is on the command line: main never reads the config; no record"
+  },
+  {
+   "id": "s012",
+   "tool": "curl",
+   "argv": [
+    "https://api.openai.com/v1",
+    "-K",
+    "{dir}/fifo"
+   ],
+   "hosts": [
+    "api.openai.com"
+   ],
+   "why": "as s010, URL before -K"
+  },
+  {
+   "id": "s013",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/fifo",
+    "example.com"
+   ],
+   "hosts": [
+    null
+   ],
+   "why": "a URL with no scheme is not read (as on main), so main reads the config: one call, no host (VAN-459)"
+  },
+  {
+   "id": "s014",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/fifo",
+    "api.openai.com/v1"
+   ],
+   "hosts": [
+    null
+   ],
+   "why": "as s013, with a watched host and no scheme (VAN-459)"
+  },
+  {
+   "id": "s015",
+   "tool": "curl",
+   "argv": [
+    "--url",
+    "example.com",
+    "-K",
+    "{dir}/fifo"
+   ],
+   "hosts": [],
+   "why": "--url is set, so main never reads the config"
+  },
+  {
+   "id": "s016",
+   "tool": "curl",
+   "argv": [
+    "--url",
+    "",
+    "-K",
+    "{dir}/fifo"
+   ],
+   "hosts": [
+    null
+   ],
+   "hosts_python": [],
+   "why": "an empty --url is no URL: Node reads the config (one call, no host). Python on main does not read it (it tests `url is None`), so it records nothing. A difference in main that is left as it is."
+  },
+  {
+   "id": "s017",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/fifo",
+    "-K",
+    "{dir}/cfg-https"
+   ],
+   "hosts": [
+    "api.openai.com"
+   ],
+   "why": "main reads the FIFO, then the next config, and finds the URL there"
+  },
+  {
+   "id": "s018",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-other",
+    "-K",
+    "{dir}/fifo"
+   ],
+   "hosts": [],
+   "why": "main stops at the first URL found (unwatched); the FIFO is not read: no record"
+  },
+  {
+   "id": "s019",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/fifo",
+    "-K",
+    "{dir}/fifo"
+   ],
+   "hosts": [
+    null
+   ],
+   "why": "two skipped files, one call"
+  },
+  {
+   "id": "s020",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/fifo",
+    "-K",
+    "{dir}/cfg-other"
+   ],
+   "hosts": [],
+   "why": "the second config gives a URL (unwatched): one URL found, no record"
+  },
+  {
+   "id": "s021",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-big-none"
+   ],
+   "hosts": [
+    null
+   ],
+   "why": "over the 1 MiB cap, no URL in the part that was read: one call, no host"
+  },
+  {
+   "id": "s022",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-big-early"
+   ],
+   "hosts": [
+    "api.openai.com"
+   ],
+   "why": "over the cap, the URL is in the part that was read"
+  },
+  {
+   "id": "s023",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-big-late"
+   ],
+   "hosts": [
+    null
+   ],
+   "why": "the URL is after the cap: not seen, one call, no host (main reads the whole file and sees it)"
+  },
+  {
+   "id": "s024",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/missing"
+   ],
+   "hosts": [],
+   "why": "a missing file: nothing"
+  },
+  {
+   "id": "s025",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "/dev/stdin",
+    "https://api.openai.com/v1"
+   ],
+   "hosts": [
+    "api.openai.com"
+   ],
+   "why": "URL with a scheme on the command line"
+  },
+  {
+   "id": "s026",
+   "tool": "curl",
+   "argv": [
+    "-K",
+    "{dir}/cfg-nested"
+   ],
+   "hosts": [],
+   "why": "a config that holds a url line: main uses it"
+  },
+  {
+   "id": "s027",
+   "tool": "curl",
+   "argv": [
+    "{dir}/fifo"
+   ],
+   "hosts": [],
+   "why": "a path as the URL, not a config: nothing"
+  },
+  {
+   "id": "s028",
+   "tool": "wget",
+   "argv": [
+    "-i",
+    "{dir}/fifo"
+   ],
+   "hosts": [
+    null
+   ],
+   "why": "main reads the file; it is skipped, no URL found: one call, no host"
+  },
+  {
+   "id": "s029",
+   "tool": "wget",
+   "argv": [
+    "-i",
+    "{dir}/lnk-fifo"
+   ],
+   "hosts": [
+    null
+   ],
+   "why": "a link to a FIFO: main reads the file; it is skipped, no URL found: one call, no host"
+  },
+  {
+   "id": "s030",
+   "tool": "wget",
+   "argv": [
+    "-i",
+    "{dir}/socket"
+   ],
+   "hosts": [
+    null
+   ],
+   "why": "a socket: main reads the file; it is skipped, no URL found: one call, no host"
+  },
+  {
+   "id": "s031",
+   "tool": "wget",
+   "argv": [
+    "-i",
+    "{dir}/dir"
+   ],
+   "hosts": [],
+   "why": "a directory: nothing"
+  },
+  {
+   "id": "s032",
+   "tool": "wget",
+   "argv": [
+    "-i",
+    "/dev/stdin"
+   ],
+   "hosts": [
+    null
+   ],
+   "why": "/dev/stdin: main reads the file; it is skipped, no URL found: one call, no host"
+  },
+  {
+   "id": "s033",
+   "tool": "wget",
+   "argv": [
+    "-i",
+    "/dev/null"
+   ],
+   "hosts": [
+    null
+   ],
+   "why": "a character device: main reads the file; it is skipped, no URL found: one call, no host"
+  },
+  {
+   "id": "s034",
+   "tool": "wget",
+   "argv": [
+    "--input-file={dir}/fifo"
+   ],
+   "hosts": [
+    null
+   ],
+   "why": "main reads the file; it is skipped, no URL found: one call, no host"
+  },
+  {
+   "id": "s035",
+   "tool": "wget",
+   "argv": [
+    "-i",
+    "{dir}/fifo",
+    "https://api.openai.com/v1"
+   ],
+   "hosts": [
+    "api.openai.com"
+   ],
+   "why": "main reads the list too, but the URL on the command line is found: no extra record"
+  },
+  {
+   "id": "s036",
+   "tool": "wget",
+   "argv": [
+    "-i",
+    "{dir}/fifo",
+    "https://example.com/a"
+   ],
+   "hosts": [],
+   "why": "a URL was found (unwatched): no record"
+  },
+  {
+   "id": "s037",
+   "tool": "wget",
+   "argv": [
+    "-i",
+    "{dir}/fifo",
+    "-i",
+    "{dir}/list-https"
+   ],
+   "hosts": [
+    "api.openai.com"
+   ],
+   "why": "the second list gives the URL"
+  },
+  {
+   "id": "s038",
+   "tool": "wget",
+   "argv": [
+    "-i",
+    "{dir}/list-big-none"
+   ],
+   "hosts": [
+    null
+   ],
+   "why": "over the 64 KiB cap, no URL read: one call, no host"
+  },
+  {
+   "id": "s039",
+   "tool": "wget",
+   "argv": [
+    "-i",
+    "{dir}/list-big-early"
+   ],
+   "hosts": [
+    "api.openai.com"
+   ],
+   "why": "over the cap, the URL is in the part that was read"
+  },
+  {
+   "id": "s040",
+   "tool": "wget",
+   "argv": [
+    "-i",
+    "{dir}/list-big-late"
+   ],
+   "hosts": [
+    null
+   ],
+   "why": "the URL is after the cap: one call, no host"
+  },
+  {
+   "id": "s041",
+   "tool": "wget",
+   "argv": [
+    "-i",
+    "{dir}/fifo",
+    "api.openai.com/v1"
+   ],
+   "hosts": [
+    null
+   ],
+   "why": "a URL with no scheme is not read (as on main): one call, no host (VAN-459)"
+  },
+  {
+   "id": "s042",
+   "tool": "aria2c",
+   "argv": [
+    "-i",
+    "{dir}/fifo"
+   ],
+   "hosts": [
+    null
+   ],
+   "why": "main reads the file; it is skipped, no URL found: one call, no host"
+  },
+  {
+   "id": "s043",
+   "tool": "aria2c",
+   "argv": [
+    "-i",
+    "/dev/stdin"
+   ],
+   "hosts": [
+    null
+   ],
+   "why": "/dev/stdin: main reads the file; it is skipped, no URL found: one call, no host"
+  },
+  {
+   "id": "s044",
+   "tool": "aria2c",
+   "argv": [
+    "-i",
+    "{dir}/fifo",
+    "https://api.openai.com/v1"
+   ],
+   "hosts": [
+    "api.openai.com"
+   ],
+   "why": "URL on the command line"
+  },
+  {
+   "id": "s045",
+   "tool": "aria2c",
+   "argv": [
+    "-i",
+    "{dir}/list-big-late"
+   ],
+   "hosts": [
+    null
+   ],
+   "why": "the URL is after the cap"
+  },
+  {
+   "id": "s046",
+   "tool": "http",
+   "argv": [
+    "-i",
+    "{dir}/fifo"
+   ],
+   "hosts": [
+    null
+   ],
+   "why": "main reads the file; it is skipped, no URL found: one call, no host"
+  },
+  {
+   "id": "s047",
+   "tool": "http",
+   "argv": [
+    "-i",
+    "{dir}/fifo",
+    "https://api.openai.com/v1"
+   ],
+   "hosts": [
+    "api.openai.com"
+   ],
+   "why": "URL on the command line"
+  }
+ ],
+ "watched": "api.openai.com",
+ "mark": "mark.example.test",
+ "expected_main": {
+  "generated_from": "8bee543191b52b637bc592c0df4865f16ec6bbf4",
+  "node": {
+   "c001": [
+    "api.openai.com"
+   ],
+   "c002": [
+    "api.openai.com"
+   ],
+   "c003": [
+    "api.openai.com"
+   ],
+   "c004": [
+    "api.openai.com"
+   ],
+   "c005": [
+    "api.openai.com"
+   ],
+   "c006": [
+    "api.openai.com"
+   ],
+   "c007": [
+    "api.openai.com"
+   ],
+   "c008": [
+    "api.openai.com"
+   ],
+   "c009": [
+    "api.openai.com"
+   ],
+   "c010": [
+    "api.openai.com"
+   ],
+   "c011": [],
+   "c012": [],
+   "c013": [
+    "api.openai.com"
+   ],
+   "c014": [
+    "api.openai.com"
+   ],
+   "c015": [
+    "llm.example.test"
+   ],
+   "c016": [
+    "api.openai.com"
+   ],
+   "c017": [
+    "api.openai.com"
+   ],
+   "c018": [
+    "api.openai.com"
+   ],
+   "c019": [
+    "api.openai.com"
+   ],
+   "c020": [
+    "api.openai.com"
+   ],
+   "c021": [
+    "api.openai.com"
+   ],
+   "c022": [],
+   "c023": [
+    "api.openai.com"
+   ],
+   "c024": [
+    "api.openai.com"
+   ],
+   "c025": [
+    "api.openai.com"
+   ],
+   "c026": [
+    "api.openai.com"
+   ],
+   "c027": [
+    "api.openai.com"
+   ],
+   "c028": [
+    "api.openai.com"
+   ],
+   "c029": [
+    "api.openai.com"
+   ],
+   "c030": [
+    "api.openai.com"
+   ],
+   "c031": [
+    "api.openai.com"
+   ],
+   "c032": [
+    "api.openai.com"
+   ],
+   "c033": [
+    "api.openai.com"
+   ],
+   "c034": [
+    "api.openai.com"
+   ],
+   "c035": [
+    "api.openai.com"
+   ],
+   "c036": [
+    "api.openai.com"
+   ],
+   "c037": [
+    "api.openai.com"
+   ],
+   "c038": [
+    "api.openai.com"
+   ],
+   "c039": [
+    "api.openai.com"
+   ],
+   "c040": [
+    "api.openai.com"
+   ],
+   "c041": [
+    "api.anthropic.com"
+   ],
+   "c042": [],
+   "c043": [
+    "api.openai.com"
+   ],
+   "c044": [
+    "api.openai.com"
+   ],
+   "c045": [
+    "api.openai.com"
+   ],
+   "c046": [],
+   "c047": [
+    "api.openai.com"
+   ],
+   "c048": [],
+   "c049": [],
+   "c050": [
+    "api.openai.com"
+   ],
+   "c051": [
+    "api.openai.com"
+   ],
+   "c052": [
+    "api.openai.com"
+   ],
+   "c053": [
+    "api.openai.com"
+   ],
+   "c054": [
+    "api.openai.com"
+   ],
+   "c055": [
+    "api.openai.com"
+   ],
+   "c056": [
+    "api.openai.com"
+   ],
+   "c057": [
+    "api.openai.com"
+   ],
+   "c058": [],
+   "c059": [],
+   "c060": [
+    "api.openai.com"
+   ],
+   "c061": [
+    "api.openai.com"
+   ],
+   "c062": [],
+   "c063": [],
+   "c064": [],
+   "c065": [],
+   "c066": [],
+   "c067": [],
+   "c068": [],
+   "c069": [
+    "api.openai.com"
+   ],
+   "c070": [
+    "api.openai.com"
+   ],
+   "c071": [
+    "api.openai.com"
+   ],
+   "c072": [
+    "api.openai.com"
+   ],
+   "c073": [
+    "api.openai.com"
+   ],
+   "c074": [
+    "api.openai.com"
+   ],
+   "c075": [
+    "api.openai.com"
+   ],
+   "c076": [],
+   "c077": [],
+   "c078": [],
+   "c079": [],
+   "c080": [],
+   "c081": [],
+   "c082": [],
+   "c083": [],
+   "c084": [],
+   "c085": [],
+   "c086": [
+    "api.openai.com"
+   ],
+   "c087": [
+    "api.openai.com"
+   ],
+   "c088": [
+    "api.openai.com"
+   ],
+   "c089": [
+    "api.openai.com"
+   ],
+   "c090": [
+    "api.openai.com"
+   ],
+   "c091": [
+    "api.openai.com"
+   ],
+   "c092": [],
+   "c093": [],
+   "c094": [
+    "api.openai.com"
+   ],
+   "c095": [
+    "api.openai.com"
+   ],
+   "c096": [],
+   "c097": [],
+   "c098": [
+    "api.openai.com"
+   ],
+   "c099": [
+    "api.openai.com"
+   ],
+   "c100": [
+    "api.openai.com"
+   ],
+   "c101": [],
+   "c102": [],
+   "c103": [],
+   "c104": [],
+   "c105": [],
+   "c106": [],
+   "c107": [],
+   "c108": [
+    "api.openai.com"
+   ],
+   "c109": [],
+   "c110": [],
+   "c111": [],
+   "c112": [],
+   "c113": [],
+   "c114": [
+    "api.openai.com"
+   ],
+   "c115": [
+    "api.openai.com"
+   ],
+   "c116": [
+    "api.openai.com"
+   ],
+   "c117": [],
+   "c118": [],
+   "c119": [],
+   "c120": [],
+   "c121": [
+    "api.openai.com"
+   ],
+   "c122": [
+    "api.openai.com"
+   ],
+   "c123": [
+    "api.openai.com"
+   ],
+   "c124": [],
+   "c125": [],
+   "c126": [],
+   "c127": [],
+   "c128": [
+    "api.openai.com"
+   ],
+   "c129": [],
+   "c130": [
+    "api.openai.com"
+   ],
+   "c131": [],
+   "c132": [],
+   "c133": [],
+   "c134": [
+    "api.openai.com"
+   ],
+   "w135": [
+    "api.openai.com"
+   ],
+   "w136": [
+    "api.openai.com"
+   ],
+   "w137": [
+    "api.openai.com"
+   ],
+   "w138": [
+    "api.openai.com"
+   ],
+   "w139": [
+    "api.openai.com"
+   ],
+   "w140": [
+    "api.openai.com"
+   ],
+   "w141": [
+    "api.openai.com"
+   ],
+   "w142": [
+    "api.openai.com"
+   ],
+   "w143": [
+    "api.openai.com"
+   ],
+   "w144": [
+    "api.openai.com"
+   ],
+   "w145": [],
+   "w146": [
+    "api.openai.com"
+   ],
+   "w147": [],
+   "w148": [
+    "api.openai.com"
+   ],
+   "w149": [],
+   "w150": [],
+   "w151": [
+    "api.openai.com"
+   ],
+   "w152": [],
+   "w153": [
+    "api.openai.com"
+   ],
+   "w154": [
+    "api.openai.com"
+   ],
+   "w155": [],
+   "w156": [
+    "api.openai.com"
+   ],
+   "w157": [],
+   "w158": [
+    "api.openai.com"
+   ],
+   "w159": [
+    "api.openai.com",
+    "api.openai.com"
+   ],
+   "a160": [
+    "api.openai.com"
+   ],
+   "a161": [
+    "api.openai.com"
+   ],
+   "a162": [],
+   "a163": [
+    "api.openai.com"
+   ],
+   "a164": [
+    "api.openai.com"
+   ],
+   "a165": [
+    "api.openai.com"
+   ],
+   "a166": [],
+   "a167": [],
+   "a168": [
+    "api.openai.com"
+   ],
+   "a169": [],
+   "h170": [
+    "api.openai.com"
+   ],
+   "h171": [
+    "api.openai.com"
+   ],
+   "h172": [
+    "api.openai.com"
+   ],
+   "h173": [
+    "api.openai.com"
+   ],
+   "h174": []
+  },
+  "python": {
+   "c001": [
+    "api.openai.com"
+   ],
+   "c002": [
+    "api.openai.com"
+   ],
+   "c003": [
+    "api.openai.com"
+   ],
+   "c004": [
+    "api.openai.com"
+   ],
+   "c005": [
+    "api.openai.com"
+   ],
+   "c006": [
+    "api.openai.com"
+   ],
+   "c007": [
+    "api.openai.com"
+   ],
+   "c008": [
+    "api.openai.com"
+   ],
+   "c009": [
+    "api.openai.com"
+   ],
+   "c010": [
+    "api.openai.com"
+   ],
+   "c011": [],
+   "c012": [],
+   "c013": [],
+   "c014": [
+    "api.openai.com"
+   ],
+   "c015": [
+    "llm.example.test"
+   ],
+   "c016": [
+    "api.openai.com"
+   ],
+   "c017": [
+    "api.openai.com"
+   ],
+   "c018": [
+    "api.openai.com"
+   ],
+   "c019": [
+    "api.openai.com"
+   ],
+   "c020": [
+    "api.openai.com"
+   ],
+   "c021": [
+    "api.openai.com"
+   ],
+   "c022": [],
+   "c023": [
+    "api.openai.com"
+   ],
+   "c024": [
+    "api.openai.com"
+   ],
+   "c025": [
+    "api.openai.com"
+   ],
+   "c026": [
+    "api.openai.com"
+   ],
+   "c027": [
+    "api.openai.com"
+   ],
+   "c028": [
+    "api.openai.com"
+   ],
+   "c029": [
+    "api.openai.com"
+   ],
+   "c030": [
+    "api.openai.com"
+   ],
+   "c031": [
+    "api.openai.com"
+   ],
+   "c032": [
+    "api.openai.com"
+   ],
+   "c033": [
+    "api.openai.com"
+   ],
+   "c034": [
+    "api.openai.com"
+   ],
+   "c035": [
+    "api.openai.com"
+   ],
+   "c036": [
+    "api.openai.com"
+   ],
+   "c037": [
+    "api.openai.com"
+   ],
+   "c038": [
+    "api.openai.com"
+   ],
+   "c039": [
+    "api.openai.com"
+   ],
+   "c040": [
+    "api.openai.com"
+   ],
+   "c041": [
+    "api.anthropic.com"
+   ],
+   "c042": [],
+   "c043": [
+    "api.openai.com"
+   ],
+   "c044": [
+    "api.openai.com"
+   ],
+   "c045": [
+    "api.openai.com"
+   ],
+   "c046": [],
+   "c047": [
+    "api.openai.com"
+   ],
+   "c048": [],
+   "c049": [],
+   "c050": [
+    "api.openai.com"
+   ],
+   "c051": [
+    "api.openai.com"
+   ],
+   "c052": [
+    "api.openai.com"
+   ],
+   "c053": [
+    "api.openai.com"
+   ],
+   "c054": [
+    "api.openai.com"
+   ],
+   "c055": [
+    "api.openai.com"
+   ],
+   "c056": [
+    "api.openai.com"
+   ],
+   "c057": [
+    "api.openai.com"
+   ],
+   "c058": [],
+   "c059": [],
+   "c060": [
+    "api.openai.com"
+   ],
+   "c061": [
+    "api.openai.com"
+   ],
+   "c062": [],
+   "c063": [],
+   "c064": [],
+   "c065": [],
+   "c066": [],
+   "c067": [],
+   "c068": [],
+   "c069": [
+    "api.openai.com"
+   ],
+   "c070": [
+    "api.openai.com"
+   ],
+   "c071": [
+    "api.openai.com"
+   ],
+   "c072": [
+    "api.openai.com"
+   ],
+   "c073": [
+    "api.openai.com"
+   ],
+   "c074": [
+    "api.openai.com"
+   ],
+   "c075": [
+    "api.openai.com"
+   ],
+   "c076": [],
+   "c077": [],
+   "c078": [],
+   "c079": [],
+   "c080": [],
+   "c081": [],
+   "c082": [],
+   "c083": [],
+   "c084": [],
+   "c085": [],
+   "c086": [
+    "api.openai.com"
+   ],
+   "c087": [
+    "api.openai.com"
+   ],
+   "c088": [
+    "api.openai.com"
+   ],
+   "c089": [
+    "api.openai.com"
+   ],
+   "c090": [
+    "api.openai.com"
+   ],
+   "c091": [
+    "api.openai.com"
+   ],
+   "c092": [],
+   "c093": [],
+   "c094": [
+    "api.openai.com"
+   ],
+   "c095": [
+    "api.openai.com"
+   ],
+   "c096": [],
+   "c097": [],
+   "c098": [
+    "api.openai.com"
+   ],
+   "c099": [
+    "api.openai.com"
+   ],
+   "c100": [
+    "api.openai.com"
+   ],
+   "c101": [],
+   "c102": [],
+   "c103": [],
+   "c104": [],
+   "c105": [],
+   "c106": [],
+   "c107": [],
+   "c108": [],
+   "c109": [
+    "api.openai.com"
+   ],
+   "c110": [],
+   "c111": [],
+   "c112": [],
+   "c113": [],
+   "c114": [
+    "api.openai.com"
+   ],
+   "c115": [
+    "api.openai.com"
+   ],
+   "c116": [
+    "api.openai.com"
+   ],
+   "c117": [],
+   "c118": [],
+   "c119": [],
+   "c120": [],
+   "c121": [],
+   "c122": [
+    "api.openai.com"
+   ],
+   "c123": [
+    "api.openai.com"
+   ],
+   "c124": [],
+   "c125": [],
+   "c126": [],
+   "c127": [],
+   "c128": [
+    "api.openai.com"
+   ],
+   "c129": [],
+   "c130": [
+    "api.openai.com"
+   ],
+   "c131": [],
+   "c132": [],
+   "c133": [],
+   "c134": [
+    "api.openai.com"
+   ],
+   "w135": [
+    "api.openai.com"
+   ],
+   "w136": [
+    "api.openai.com"
+   ],
+   "w137": [
+    "api.openai.com"
+   ],
+   "w138": [
+    "api.openai.com"
+   ],
+   "w139": [
+    "api.openai.com"
+   ],
+   "w140": [
+    "api.openai.com"
+   ],
+   "w141": [
+    "api.openai.com"
+   ],
+   "w142": [
+    "api.openai.com"
+   ],
+   "w143": [
+    "api.openai.com"
+   ],
+   "w144": [
+    "api.openai.com"
+   ],
+   "w145": [],
+   "w146": [
+    "api.openai.com"
+   ],
+   "w147": [],
+   "w148": [
+    "api.openai.com"
+   ],
+   "w149": [],
+   "w150": [],
+   "w151": [
+    "api.openai.com"
+   ],
+   "w152": [],
+   "w153": [
+    "api.openai.com"
+   ],
+   "w154": [
+    "api.openai.com"
+   ],
+   "w155": [],
+   "w156": [
+    "api.openai.com"
+   ],
+   "w157": [],
+   "w158": [
+    "api.openai.com"
+   ],
+   "w159": [
+    "api.openai.com",
+    "api.openai.com"
+   ],
+   "a160": [
+    "api.openai.com"
+   ],
+   "a161": [
+    "api.openai.com"
+   ],
+   "a162": [],
+   "a163": [
+    "api.openai.com"
+   ],
+   "a164": [
+    "api.openai.com"
+   ],
+   "a165": [
+    "api.openai.com"
+   ],
+   "a166": [],
+   "a167": [],
+   "a168": [
+    "api.openai.com"
+   ],
+   "a169": [],
+   "h170": [
+    "api.openai.com"
+   ],
+   "h171": [
+    "api.openai.com"
+   ],
+   "h172": [
+    "api.openai.com"
+   ],
+   "h173": [
+    "api.openai.com"
+   ],
+   "h174": []
+  }
+ },
+ "known_main_mismatch": [
+  "c013",
+  "c108",
+  "c109",
+  "c121"
+ ]
+}

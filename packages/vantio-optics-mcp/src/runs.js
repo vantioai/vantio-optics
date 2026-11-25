@@ -95,8 +95,10 @@ export function loadRun(traceOrPrefix, dir = runsDir()) {
 export function proveMarkdown(log) {
   const calls = Array.isArray(log.calls) ? log.calls : [];
   const counted = countedCalls(calls);
-  const noHost = calls.length - counted.length;
   const summary = log.summary || {};
+  // A log written before option A has no `calls_without_host` and its summary
+  // counts a call with no known host, so the note is for new logs only.
+  const noHost = typeof summary.calls_without_host === "number" ? calls.length - counted.length : 0;
   const totalCalls = summary.total_calls ?? counted.length;
   const totalBytes = summary.total_bytes ?? counted.reduce((a, c) => a + (c.bytes || 0), 0);
   const hosts = Array.isArray(summary.hosts)

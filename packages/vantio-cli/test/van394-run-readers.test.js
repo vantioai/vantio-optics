@@ -1,12 +1,11 @@
 // VAN-394, owner decision option A: a call with no known host is recorded, but
 // it is left out of the call count, the byte totals and the run status.
 //
-// Part 1 goes through the real `vantio run` entry point and checks that the
-// run file and every reader agree. Part 2 runs the shared curl / wget / aria2c
-// vectors that the Python tests run too.
+// These tests go through the real `vantio run` entry point and check that the
+// run file and every reader agree.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -16,11 +15,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const require = createRequire(import.meta.url);
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CLI_PATH = join(__dirname, "..", "bin", "vantio.js");
-const INTERCEPTOR_PATH = join(__dirname, "..", "bin", "interceptor.cjs");
-const VECTORS_PATH = join(__dirname, "fixtures", "van394-curl-vectors.json");
 // Sibling packages. They are in the repository, not in the published package.
 const PY_SDK_DIR = join(__dirname, "..", "..", "vantio-agent-sdk-py");
-const PY_VECTORS_PATH = join(PY_SDK_DIR, "tests", "van394_curl_vectors.json");
 const MCP_RUNS_PATH = join(__dirname, "..", "..", "vantio-optics-mcp", "src", "runs.js");
 
 const HAS_PYTHON = existsSync(join(PY_SDK_DIR, "vantio", "__init__.py"))
@@ -40,7 +36,7 @@ function standInBin() {
 }
 const BIN = standInBin();
 
-// ── Part 1: `vantio run`, then every reader ──
+// ── `vantio run`, then every reader ──
 
 const NO_HOST_ARGV = ["-K", "/dev/null", "-d", "abc"];
 const KNOWN_ARGV = ["-d", "abcde", `https://${WATCHED}/v1/x`];
@@ -184,6 +180,23 @@ async function checkReaders(runtime, name) {
   const destinations = JSON.parse(vantio(home, ["destinations", "--json"]).stdout);
   assert.ok(!JSON.stringify(destinations.alerts).includes("unknown"), say("destinations"));
 
+  // tail, search and export. The rows still list the no-host call. A field
+  // that counts calls, and a status, follow the shared rule.
+  const tail = JSON.parse(vantio(home, ["tail", `--run=${trace}`, "--json", "--all"]).stdout);
+  assert.equal(tail.calls.length, rows, say("tail lists every row"));
+  assert.equal(tail.shown, rows);
+  assert.equal(tail.total_calls, known, say("tail total_calls"));
+  assert.equal(tail.opticsStatus, status, say("tail status"));
+  const search = JSON.parse(vantio(home, ["search", `--run=${trace}`, "--json"]).stdout);
+  assert.equal(search.calls.length, rows, say("search lists every row"));
+  assert.equal(search.opticsStatus, status, say("search status"));
+  const exported = vantio(home, ["export", "--jsonl=-"]).stdout
+    .split("\n").filter((l) => l.startsWith("{")).map((l) => JSON.parse(l))
+    .filter((e) => e.kind === "observation" && e.trace_id === trace);
+  assert.equal(exported.length, rows, say("export lists every call"));
+  assert.equal(exported.filter((e) => e.no_host === true).length, noHost, say("export marks the no-host call"));
+  assert.ok(exported.filter((e) => e.destination === WATCHED).every((e) => !("no_host" in e)), say("export marks only that call"));
+
   // The MCP readers.
   if (HAS_MCP) {
     const mcp = await import(pathToFileURL(MCP_RUNS_PATH).href);
@@ -242,76 +255,4 @@ test("the CLI and the MCP package count calls by the same rule", { skip: HAS_MCP
   const calls = [{ hostname: "a.example.test" }, { hostname: null }, { hostname: "" }, {}, null, { hostname: "b.example.test" }];
   assert.deepEqual(countedCalls(calls), [calls[0], calls[5]]);
   assert.deepEqual(mcp.countedCalls(calls), countedCalls(calls));
-});
-
-// ── Part 2: the shared vectors ──
-
-const VECTORS = JSON.parse(readFileSync(VECTORS_PATH, "utf8"));
-
-function writeVectorFiles() {
-  const dir = mkdtempSync(join(tmpdir(), "van394-vectors-"));
-  for (const [name, spec] of Object.entries(VECTORS.files)) {
-    const path = join(dir, name);
-    if (spec.fifo) execFileSync("mkfifo", [path]);
-    else writeFileSync(path, (spec.text || "") + (spec.repeat || "").repeat(spec.times || 0) + (spec.then || ""));
-  }
-  return dir;
-}
-
-// One wrapped process runs every vector. A call to the mark host after each
-// one splits the recorded calls back into vectors.
-const VECTOR_AGENT = `
-const { spawnSync } = require("node:child_process");
-for (const [tool, argv] of JSON.parse(process.env.VAN394_COMMANDS)) {
-  spawnSync(tool, argv, { stdio: "ignore", timeout: 5000 });
-  spawnSync("curl", ["https://" + process.env.VAN394_MARK + "/"], { stdio: "ignore", timeout: 5000 });
-}
-`;
-
-function recordedHostsPerVector(interceptorPath) {
-  const dir = writeVectorFiles();
-  const home = mkdtempSync(join(tmpdir(), "van394-vectors-home-"));
-  const commands = VECTORS.vectors.map((v) => [v.tool, v.argv.map((a) => a.replace("{dir}", dir))]);
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ["--require", interceptorPath, "-e", VECTOR_AGENT], {
-      env: {
-        PATH: `${BIN}:${process.env.PATH}`,
-        VANTIO_HOME: home,
-        VANTIO_TRACE_ID: "van394vectors",
-        VANTIO_EXTRA_LLM_HOSTS: `${VECTORS.watched},${VECTORS.mark}`,
-        VAN394_COMMANDS: JSON.stringify(commands),
-        VAN394_MARK: VECTORS.mark,
-      },
-      stdio: "ignore",
-    });
-    const killer = setTimeout(() => child.kill("SIGKILL"), 90000);
-    child.on("close", (code, signal) => {
-      clearTimeout(killer);
-      if (code !== 0) return reject(new Error(`the agent ended with ${code} ${signal}`));
-      const log = JSON.parse(readFileSync(join(home, "runs", "van394vectors.json"), "utf8"));
-      const perVector = [[]];
-      for (const call of log.calls) {
-        if (call.hostname === VECTORS.mark) perVector.push([]);
-        else perVector[perVector.length - 1].push(call.hostname);
-      }
-      perVector.pop();
-      resolve(perVector);
-    });
-  });
-}
-
-test("shared vectors: each command records the hosts the vector file names", { timeout: 120000 }, async () => {
-  const got = await recordedHostsPerVector(process.env.VAN394_INTERCEPTOR || INTERCEPTOR_PATH);
-  assert.equal(got.length, VECTORS.vectors.length, "one mark call per vector");
-  const wrong = [];
-  VECTORS.vectors.forEach((v, i) => {
-    if (JSON.stringify(got[i]) !== JSON.stringify(v.hosts)) {
-      wrong.push(`[${v.group}] ${v.name}: ${v.tool} ${JSON.stringify(v.argv)} recorded ${JSON.stringify(got[i])}, expected ${JSON.stringify(v.hosts)}`);
-    }
-  });
-  assert.deepEqual(wrong, []);
-});
-
-test("shared vectors: the Node and Python copies are the same file", { skip: existsSync(PY_VECTORS_PATH) ? false : "the Python package is not here" }, () => {
-  assert.equal(readFileSync(PY_VECTORS_PATH, "utf8"), readFileSync(VECTORS_PATH, "utf8"));
 });

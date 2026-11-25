@@ -1129,6 +1129,8 @@ function exportEventFromObservation(observation, allowlist, alertKeys, flaggedAl
     bytes: observation.bytes,
     http_status: observation.http_status,
     optics_status: "OBSERVED",
+    // VAN-394: set only on a call with no known host, as in coverage --json.
+    no_host: observation.no_host ? true : undefined,
     authority,
     trace_id: observation.trace_id,
     otel_trace_id: otelHex(observation.trace_id || `${observation.program}\n${observation.seq}`, 32),
@@ -1319,6 +1321,7 @@ function publicExportEvent(event) {
     mediation: event.mediation,
     pid: event.pid,
     system_hostname: event.system_hostname,
+    no_host: event.no_host ? true : undefined,
   };
 }
 

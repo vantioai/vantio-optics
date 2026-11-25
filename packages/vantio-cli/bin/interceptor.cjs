@@ -1609,171 +1609,8 @@ globalThis.fetch = function vantioFetch(input, init) {
     return Buffer.byteLength(rhs);
   }
 
-  // curl reads an argument with no scheme as host[:port][/path] and uses http
-  // (VAN-394). A name that starts with ftp., dict., ldap., imap., smtp. or
-  // pop3. is read by curl as that protocol, so it is not taken here.
-  // The pattern is ASCII only and spells out the characters that end a URL,
-  // so Node and Python read the same tokens the same way.
-  const SCHEMELESS_URL_RE = /^(localhost|(?:[0-9]{1,3}\.){3}[0-9]{1,3}|\[[0-9a-f:.]+\]|(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]*[a-z0-9])(?::[0-9]{1,5})?(?:[/?#][^\u0000-\u0020\u007f-\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]*)?$/i;
-  const SCHEMELESS_OTHER_PROTOCOL_RE = /^(?:ftp|dict|ldap|imap|smtp|pop3)\./i;
-
-  function isSchemelessUrl(token) {
-    const t = String(token || "");
-    return SCHEMELESS_URL_RE.test(t) && !SCHEMELESS_OTHER_PROTOCOL_RE.test(t);
-  }
-
-  // Returns the URL with a scheme, or null when the token is not a URL.
-  function httpUrlFromToken(token, defaultScheme) {
-    const t = String(token || "");
-    if (/^https?:\/\//i.test(t)) return t;
-    if (defaultScheme && isSchemelessUrl(t)) return `${defaultScheme}://${t}`;
-    return null;
-  }
-
-  // Every option in `curl --help all` of curl 8.5.0, split by whether it takes
-  // a value. A value is never a URL, so `-o api.example.test` is not read as
-  // a call. The help prints --proxy, --preproxy and --haproxy-clientip with
-  // no <value>, but they take one.
-  const CURL_SHORT_WITH_VALUE = "ACDEFHKPQTUXYbcdehmortuwxyz";
-  const CURL_SHORT_NO_VALUE = "#012346:BGIJLMNORSVZafgijklnpqsv";
-  const CURL_LONG_WITH_VALUE = new Set((
-    "abstract-unix-socket alt-svc aws-sigv4 cacert capath cert cert-type ciphers config connect-timeout " +
-    "connect-to continue-at cookie cookie-jar create-file-mode crlfile curves data data-ascii " +
-    "data-binary data-raw data-urlencode delegation dns-interface dns-ipv4-addr dns-ipv6-addr " +
-    "dns-servers doh-url dump-header egd-file engine etag-compare etag-save expect100-timeout form " +
-    "form-string ftp-account ftp-alternative-to-user ftp-method ftp-port ftp-ssl-ccc-mode " +
-    "happy-eyeballs-timeout-ms haproxy-clientip header help hostpubmd5 hostpubsha256 hsts interface " +
-    "ipfs-gateway json keepalive-time key key-type krb libcurl limit-rate local-port login-options " +
-    "mail-auth mail-from mail-rcpt max-filesize max-redirs max-time netrc-file noproxy oauth2-bearer " +
-    "output output-dir parallel-max pass pinnedpubkey preproxy proto proto-default proto-redir proxy " +
-    "proxy-cacert proxy-capath proxy-cert proxy-cert-type proxy-ciphers proxy-crlfile proxy-header " +
-    "proxy-key proxy-key-type proxy-pass proxy-pinnedpubkey proxy-service-name proxy-tls13-ciphers " +
-    "proxy-tlsauthtype proxy-tlspassword proxy-tlsuser proxy-user proxy1.0 pubkey quote random-file " +
-    "range rate referer request request-target resolve retry retry-delay retry-max-time sasl-authzid " +
-    "service-name socks4 socks4a socks5 socks5-gssapi-service socks5-hostname speed-limit speed-time " +
-    "stderr telnet-option tftp-blksize time-cond tls-max tls13-ciphers tlsauthtype tlspassword tlsuser " +
-    "trace trace-ascii trace-config unix-socket upload-file url url-query user user-agent variable " +
-    "write-out"
-  ).split(" "));
-  const CURL_LONG_NO_VALUE = new Set((
-    "anyauth append basic ca-native cert-status compressed compressed-ssh create-dirs crlf digest " +
-    "disable disable-eprt disable-epsv disallow-username-in-url doh-cert-status doh-insecure fail " +
-    "fail-early fail-with-body false-start form-escape ftp-create-dirs ftp-pasv ftp-pret " +
-    "ftp-skip-pasv-ip ftp-ssl-ccc ftp-ssl-control get globoff haproxy-protocol head http0.9 http1.0 " +
-    "http1.1 http2 http2-prior-knowledge http3 http3-only ignore-content-length include insecure ipv4 " +
-    "ipv6 junk-session-cookies list-only location location-trusted mail-rcpt-allowfails manual metalink " +
-    "negotiate netrc netrc-optional next no-alpn no-buffer no-clobber no-keepalive no-npn " +
-    "no-progress-meter no-sessionid ntlm ntlm-wb parallel parallel-immediate path-as-is post301 post302 " +
-    "post303 progress-bar proxy-anyauth proxy-basic proxy-ca-native proxy-digest proxy-http2 " +
-    "proxy-insecure proxy-negotiate proxy-ntlm proxy-ssl-allow-beast proxy-ssl-auto-client-cert " +
-    "proxy-tlsv1 proxytunnel raw remote-header-name remote-name remote-name-all remote-time " +
-    "remove-on-error retry-all-errors retry-connrefused sasl-ir show-error silent socks5-basic " +
-    "socks5-gssapi socks5-gssapi-nec ssl ssl-allow-beast ssl-auto-client-cert ssl-no-revoke ssl-reqd " +
-    "ssl-revoke-best-effort sslv2 sslv3 styled-output suppress-connect-headers tcp-fastopen tcp-nodelay " +
-    "tftp-no-options tlsv1 tlsv1.0 tlsv1.1 tlsv1.2 tlsv1.3 tr-encoding trace-ids trace-time use-ascii " +
-    "verbose version xattr"
-  ).split(" "));
-
-  // "value", "flag", or null. curl takes a long option by its full name or by
-  // a prefix that only one option starts with. A name that is unknown, or a
-  // prefix that fits more than one option, gives null: the caller must not
-  // guess.
-  function curlLongOptionKind(name) {
-    if (CURL_LONG_WITH_VALUE.has(name)) return "value";
-    if (CURL_LONG_NO_VALUE.has(name)) return "flag";
-    if (!name) return null;
-    let kind = null;
-    let hits = 0;
-    for (const n of CURL_LONG_WITH_VALUE) if (n.startsWith(name)) { hits += 1; kind = "value"; }
-    for (const n of CURL_LONG_NO_VALUE) if (n.startsWith(name)) { hits += 1; kind = "flag"; }
-    if (hits === 1) return kind;
-    if (hits === 0 && name.startsWith("no-") && CURL_LONG_NO_VALUE.has(name.slice(3))) return "flag";
-    return null;
-  }
-
-  // For an argument that starts with "-": whether it is known, and whether
-  // its value is the next argument.
-  function curlOptionShape(a) {
-    if (a.startsWith("--")) {
-      const kind = curlLongOptionKind(a.slice(2));
-      return { known: kind != null, takesNext: kind === "value" };
-    }
-    // A short cluster such as -sSo: the first letter that takes a value ends
-    // it. The value is the rest of the argument, or the next argument.
-    for (let j = 1; j < a.length; j++) {
-      if (CURL_SHORT_WITH_VALUE.includes(a[j])) return { known: true, takesNext: j === a.length - 1 };
-      if (!CURL_SHORT_NO_VALUE.includes(a[j])) return { known: false, takesNext: false };
-    }
-    return { known: true, takesNext: false };
-  }
-
-  function curlDefaultScheme(protoDefault) {
-    if (protoDefault == null) return "http";
-    const p = String(protoDefault).toLowerCase();
-    return p === "http" || p === "https" ? p : null;
-  }
-
-  // `schemeless` is true only for wget, which reads an entry with no scheme as
-  // http (checked with GNU Wget 1.21.4). aria2c and httpie lists keep the old
-  // rule: only entries with a scheme.
-  function urlsFromListFile(path, stdinSize, options, skipped, schemeless) {
-    const cap = CLI_LIST_CAP;
-    const maxUrls = 32;
-    let text = "";
-    try {
-      if (String(path || "") === "-") {
-        if (options && options.input != null) {
-          const raw = Buffer.isBuffer(options.input)
-            ? options.input
-            : Buffer.from(String(options.input), "utf8");
-          text = raw.slice(0, cap).toString("utf8");
-        } else {
-          if (!stdinSize) return [];
-          let fd = 0;
-          const stdio = options && options.stdio;
-          if (stdio != null) {
-            const s0 = Array.isArray(stdio) ? stdio[0] : stdio;
-            if (typeof s0 === "number") fd = s0;
-            else if (s0 && typeof s0.fd === "number") fd = s0.fd;
-            else if (s0 !== "inherit") return [];
-          }
-          const buf = Buffer.alloc(Math.min(Number(stdinSize) || 0, cap));
-          const n = readSync(fd, buf, 0, buf.length, 0);
-          text = buf.slice(0, n).toString("utf8");
-        }
-      } else {
-        const raw = readRegularFile(path, cap, skipped);
-        if (raw == null) return [];
-        text = raw.toString("utf8");
-      }
-    } catch {
-      return [];
-    }
-    const urls = [];
-    for (const line of String(text).split(/\r?\n/)) {
-      const s = line.trim();
-      if (!s || s.startsWith("#")) continue;
-      const token = s.split(/\s+/)[0];
-      const found = httpUrlFromToken(token, schemeless ? "http" : null);
-      if (found) urls.push(found);
-      if (urls.length >= maxUrls) break;
-    }
-    return urls;
-  }
-
-  const CURL_DATA_AT_FILE = {
-    "-d": true,
-    "--data": true,
-    "--data-binary": true,
-    "--data-ascii": true,
-    "--data-urlencode": true,
-    "--json": true,
-    "--data-raw": false,
-  };
-
   // Limits on what is read to find a URL (VAN-394). A curl -K config is read
-  // up to 1 MiB; a URL after that is not seen. A wget -i list is read up to
-  // 64 KiB, as before.
+  // up to 1 MiB and a wget -i list up to 64 KiB (the list cap is as on main).
   const CLI_CONFIG_CAP = 1024 * 1024;
   const CLI_LIST_CAP = 64 * 1024;
 
@@ -1825,12 +1662,64 @@ globalThis.fetch = function vantioFetch(input, init) {
     }
   }
 
-  // Every `url` line of a curl config, in order (at most 32).
-  function urlsFromCurlConfig(path, skipped) {
+  function urlsFromListFile(path, stdinSize, options, skipped) {
+    const cap = CLI_LIST_CAP;
+    const maxUrls = 32;
+    let text = "";
+    try {
+      if (String(path || "") === "-") {
+        if (options && options.input != null) {
+          const raw = Buffer.isBuffer(options.input)
+            ? options.input
+            : Buffer.from(String(options.input), "utf8");
+          text = raw.slice(0, cap).toString("utf8");
+        } else {
+          if (!stdinSize) return [];
+          let fd = 0;
+          const stdio = options && options.stdio;
+          if (stdio != null) {
+            const s0 = Array.isArray(stdio) ? stdio[0] : stdio;
+            if (typeof s0 === "number") fd = s0;
+            else if (s0 && typeof s0.fd === "number") fd = s0.fd;
+            else if (s0 !== "inherit") return [];
+          }
+          const buf = Buffer.alloc(Math.min(Number(stdinSize) || 0, cap));
+          const n = readSync(fd, buf, 0, buf.length, 0);
+          text = buf.slice(0, n).toString("utf8");
+        }
+      } else {
+        const raw = readRegularFile(path, cap, skipped);
+        if (raw == null) return [];
+        text = raw.toString("utf8");
+      }
+    } catch {
+      return [];
+    }
     const urls = [];
+    for (const line of String(text).split(/\r?\n/)) {
+      const s = line.trim();
+      if (!s || s.startsWith("#")) continue;
+      const token = s.split(/\s+/)[0];
+      if (/^https?:\/\//i.test(token)) urls.push(token);
+      if (urls.length >= maxUrls) break;
+    }
+    return urls;
+  }
+
+  const CURL_DATA_AT_FILE = {
+    "-d": true,
+    "--data": true,
+    "--data-binary": true,
+    "--data-ascii": true,
+    "--data-urlencode": true,
+    "--json": true,
+    "--data-raw": false,
+  };
+
+  function urlFromCurlConfig(path, skipped) {
     try {
       const raw = readRegularFile(path, CLI_CONFIG_CAP, skipped);
-      if (raw == null) return urls;
+      if (raw == null) return null;
       const text = raw.toString("utf8");
       for (const line of text.split(/\r?\n/)) {
         const s = line.trim();
@@ -1839,33 +1728,22 @@ globalThis.fetch = function vantioFetch(input, init) {
         let rest = s.slice(3).trim();
         if (rest.startsWith("=")) rest = rest.slice(1).trim();
         rest = rest.replace(/^["']|["']$/g, "");
-        const found = httpUrlFromToken(rest, "http");
-        if (found && !urls.includes(found)) urls.push(found);
-        if (urls.length >= 32) break;
+        if (/^https?:\/\//i.test(rest)) return rest;
       }
     } catch { /* missing config — pass through */ }
-    return urls;
+    return null;
   }
 
   function parseCurlArgv(argv, stdinSize) {
     let url = null;
     let dataBytes = 0;
-    // curl contacts every URL on the command line and in each -K config.
-    // `url` is the one URL the parser has always used. The rest are kept as
-    // further candidates; the caller records the first one that is watched.
-    const schemed = [];
-    const bare = [];
-    let bareReliable = true;
-    let noMoreOptions = false;
-    let valueAt = -1;
-    let protoDefault = null;
     const configPaths = [];
+    const skipped = [];
     const args = Array.isArray(argv) ? argv : [];
     for (let i = 0; i < args.length; i++) {
       const a = String(args[i]);
       if (a === "--url" || a === "-url") {
         url = args[i + 1] != null ? String(args[i + 1]) : null;
-        if (url != null && isSchemelessUrl(url)) bare.push(url);
         i += 1;
         continue;
       }
@@ -1936,41 +1814,18 @@ globalThis.fetch = function vantioFetch(input, init) {
         dataBytes += fileByteLength(a.slice(2), stdinSize);
         continue;
       }
-      if (/^https?:\/\//i.test(a)) {
-        if (!url) url = a;
-        schemed.push(a);
-      } else if (!noMoreOptions && a === "--") {
-        noMoreOptions = true;
-      } else if (!noMoreOptions && a.startsWith("-") && a.length > 1) {
-        if (a === "--proto-default" && args[i + 1] != null) protoDefault = String(args[i + 1]);
-        const shape = curlOptionShape(a);
-        // An option this table does not know, or a prefix that fits more than
-        // one option: its value cannot be told from a URL. No argument with
-        // no scheme is read from this command line then.
-        if (!shape.known) bareReliable = false;
-        else if (shape.takesNext) valueAt = i + 1;
-      } else if (i !== valueAt && isSchemelessUrl(a)) {
-        bare.push(a);
+      if (!url && /^https?:\/\//i.test(a)) url = a;
+    }
+    if (!url) {
+      for (const p of configPaths) {
+        const fromCfg = urlFromCurlConfig(p, skipped);
+        if (fromCfg) {
+          url = fromCfg;
+          break;
+        }
       }
     }
-    // Candidates, in order: the URL the parser has always used, other URLs
-    // with a scheme, arguments with no scheme (curl reads them as
-    // host[:port][/path] over http, or over --proto-default), then the URLs
-    // of each -K config.
-    const candidates = [];
-    const add = (u) => {
-      if (u && !candidates.includes(u)) candidates.push(u);
-    };
-    if (url && /^https?:\/\//i.test(url)) add(url);
-    for (const u of schemed) add(u);
-    const scheme = curlDefaultScheme(protoDefault);
-    if (bareReliable && scheme) for (const b of bare) add(`${scheme}://${b}`);
-    const skipped = [];
-    for (const p of configPaths) {
-      for (const u of urlsFromCurlConfig(p, skipped)) add(u);
-    }
-    return { urls: candidates, dataBytes, skipped: skipped.length, firstOnly: true };
-
+    return { urls: url ? [url] : [], dataBytes, skipped: skipped.length };
   }
 
   function takeInputFileArg(args, i, a) {
@@ -2029,7 +1884,7 @@ globalThis.fetch = function vantioFetch(input, init) {
     const skipped = [];
     if (url) urls.push(url);
     for (const p of listPaths) {
-      for (const u of urlsFromListFile(p, stdinSize, options, skipped, true)) {
+      for (const u of urlsFromListFile(p, stdinSize, options, skipped)) {
         if (!urls.includes(u)) urls.push(u);
       }
     }
@@ -2129,22 +1984,18 @@ globalThis.fetch = function vantioFetch(input, init) {
   function applyCliGate(tool, argv, options) {
     const parsed = parseCliArgv(tool, argv, options);
     const urls = Array.isArray(parsed.urls) ? parsed.urls : [];
-    let recorded = 0;
     for (const url of urls) {
       const dest = destFromCurlUrl(url);
       if (decideCurl(url, dest.hostname, dest.port, parsed.dataBytes) !== "observe") continue;
       recordCli(tool, dest.hostname, dest.port, parsed.dataBytes);
       spentUsd += (parsed.dataBytes || 0) * USD_PER_BYTE;
-      recorded += 1;
-      // One curl call is one record: the first watched URL.
-      if (parsed.firstOnly) break;
     }
-    // No watched host was found, and a -K or -i file could not be read in
-    // full: a FIFO, device or socket that the child alone may read, or a file
-    // over the cap (VAN-394). That file could hold a watched URL, so the call
-    // is recorded with no host. It adds no spend, and the run summary leaves
-    // it out of the call count and the byte totals.
-    if (recorded === 0 && parsed.skipped > 0) recordCli(tool, null, null, parsed.dataBytes);
+    // Main would have read a -K or -i file to find the URL, and it could not
+    // be read in full: a FIFO, device or socket that the child alone may read,
+    // or a file over the cap (VAN-394). That file could hold a watched URL, so
+    // the call is recorded with no host. It adds no spend, and the run summary
+    // leaves it out of the call count and the byte totals.
+    if (urls.length === 0 && parsed.skipped > 0) recordCli(tool, null, null, parsed.dataBytes);
   }
 
   cp.spawn = function vantioSpawn(...args) {

@@ -71,7 +71,7 @@ const NO_HOST = { hostname: null, action: "OBSERVED", bytes: 5000, ts: "2026-11-
 const KNOWN = { hostname: "llm.example.test", action: "OBSERVED", bytes: 300, ts: "2026-11-25T00:00:00.800Z" };
 
 test("a no-host call gets no discover row, no place in the totals, and its own count", () => {
-  const { root, dir } = fixtureDir({ vantio_run_log: "1", trace_id: "van394mcp", calls: [NO_HOST, KNOWN] });
+  const { root, dir } = fixtureDir({ vantio_run_log: "1", trace_id: "van394mcp", calls: [NO_HOST, KNOWN], summary: { total_calls: 1, total_bytes: 300, calls_without_host: 1, hosts: ["llm.example.test"] } });
   const hosts = discoverLocal(30 * 24 * 60 * 60 * 1000, dir);
   assert.deepEqual(hosts.map((h) => [h.hostname, h.calls, h.bytes]), [["llm.example.test", 1, 300]]);
   assert.equal(hosts.calls_without_host, 1);
@@ -95,6 +95,19 @@ test("a known-host call is still counted with its bytes, with no no-host line", 
   const md = proveMarkdown(loadRun("van394mcpk", dir).log);
   assert.match(md, /- Total calls: \*\*1\*\*/);
   assert.match(md, /## Calls \(1\)\n/);
+  assert.ok(!md.includes("no known host"), md);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("a log from before option A prints no no-host line, as its summary counts that call", () => {
+  const { root, dir } = fixtureDir({
+    vantio_run_log: "1",
+    trace_id: "van394mcpold",
+    calls: [NO_HOST, KNOWN],
+    summary: { total_calls: 2, total_bytes: 5300, hosts: ["llm.example.test", "unknown"] },
+  });
+  const md = proveMarkdown(loadRun("van394mcpold", dir).log);
+  assert.match(md, /- Total calls: \*\*2\*\*/);
   assert.ok(!md.includes("no known host"), md);
   rmSync(root, { recursive: true, force: true });
 });
