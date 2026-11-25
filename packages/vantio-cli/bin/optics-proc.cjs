@@ -339,15 +339,23 @@ function createWrapSampler(options) {
     timer = setInterval(sample, intervalMs);
     if (timer.unref) timer.unref();
   }
+  function collected() {
+    return {
+      processes: [...processes.values()],
+      connections: [...connections.values()],
+    };
+  }
   return {
+    // Read what was seen so far. Sampling goes on.
+    snapshot() {
+      sample();
+      return collected();
+    },
     stop() {
       if (timer) clearInterval(timer);
       timer = null;
       sample();
-      return {
-        processes: [...processes.values()],
-        connections: [...connections.values()],
-      };
+      return collected();
     },
   };
 }

@@ -26,6 +26,9 @@ const {
   formatLiveAlert,
   noteWrappedSocket,
   recordWrappedRun,
+  describeRunState,
+  runRecordIntervalMs,
+  runStateOf,
   watchLiveJournal,
 } = require("./optics-features.cjs");
 const { createWrapSampler } = require("./optics-proc.cjs");
@@ -386,6 +389,9 @@ function runCommand(rest) {
     ...(mergedPythonPath ? { PYTHONPATH: mergedPythonPath } : {}),
   });
 
+  // A nested run starts its own running record. Do not inherit the owner mark.
+  delete childEnv.VANTIO_RUN_RECORD_OWNER_PID;
+
   function writeRunJson(exitCode, signal) {
     if (!values.json) return;
     process.stdout.write(JSON.stringify(withSchema({
@@ -401,7 +407,41 @@ function runCommand(rest) {
   process.stderr.write(`[ ∅ VANTIO ] run trace_id=${runTraceId}\n`);
 
   const startedAt = new Date().toISOString();
+  // Installed before the program starts: a signal that arrives right after
+  // the start must not find the default action (end this process at once).
+  // Pass SIGTERM, SIGINT and SIGHUP to the child, then wait for it. This
+  // process does not create a process group, so the signal goes to the child
+  // only. A second signal is passed on too and never ends this process before
+  // the child is gone. From a terminal, Ctrl+C also reaches the child directly,
+  // so the child can see that signal twice.
+  const forwardedSignals = ["SIGTERM", "SIGINT", "SIGHUP"];
+  const forwarders = new Map();
+  for (const name of forwardedSignals) {
+    const handler = () => {
+      if (child.exitCode !== null || child.signalCode !== null) return;
+      try { child.kill(name); } catch { /* the child is already gone */ }
+    };
+    forwarders.set(name, handler);
+    process.on(name, handler);
+  }
+  function stopForwarding() {
+    for (const [name, handler] of forwarders) process.removeListener(name, handler);
+  }
+
   const child = spawn(program, programArgs, { stdio: "inherit", env: childEnv, shell: false });
+
+  // A program that is not Node or Python has no in-process hook. Here the run
+  // record is kept up to date from the process table while the program runs.
+  // Node and Python programs keep their own running record (see interceptor.cjs
+  // and _http_observe.py), so this process leaves that file alone until exit.
+  const keepRunning = !nodeRuntime && !pythonRuntime;
+  const intervalMs = runRecordIntervalMs();
+  const RUNNING_MIN_GAP_MS = 250;
+  let lastRunningWrite = 0;
+  let runningTimer = null;
+  let runningFlush = null;
+  let finished = false;
+
   const sampler = child.pid && process.platform === "linux"
     ? createWrapSampler({
       procRoot: "/proc",
@@ -418,22 +458,60 @@ function runCommand(rest) {
           const detail = err && err.message ? String(err.message).split("\n")[0] : "failed";
           process.stderr.write(`vantio run: could not record the live destination: ${detail}\n`);
         }
+        // A new destination updates the running record now, at most 4 times a second.
+        if (keepRunning && intervalMs > 0 && !finished) {
+          const wait = RUNNING_MIN_GAP_MS - (Date.now() - lastRunningWrite);
+          if (wait <= 0) {
+            saveRunningRun();
+          } else if (!runningFlush) {
+            runningFlush = setTimeout(() => { runningFlush = null; saveRunningRun(); }, wait);
+            if (runningFlush.unref) runningFlush.unref();
+          }
+        }
       },
     })
     : null;
 
-  function saveWrappedRun() {
+  function wrappedRunInput(sampled) {
+    return {
+      traceId: runTraceId,
+      program: basename(program),
+      pid: child.pid || null,
+      ppid: process.pid,
+      startedAt,
+      processes: sampled.processes,
+      connections: sampled.connections,
+    };
+  }
+
+  function saveRunningRun() {
+    if (finished || !sampler) return;
+    lastRunningWrite = Date.now();
+    try {
+      recordWrappedRun(Object.assign(wrappedRunInput(sampler.snapshot()), {
+        running: true,
+        updateIntervalMs: intervalMs,
+      }));
+    } catch (err) {
+      const detail = err && err.message ? String(err.message).split("\n")[0] : "failed";
+      process.stderr.write(`vantio run: could not update the running record: ${detail}\n`);
+    }
+  }
+
+  if (keepRunning && sampler && intervalMs > 0) {
+    runningTimer = setInterval(saveRunningRun, intervalMs);
+    if (runningTimer.unref) runningTimer.unref();
+  }
+
+  function saveWrappedRun(exitCode, signal) {
+    finished = true;
+    if (runningTimer) clearInterval(runningTimer);
+    runningTimer = null;
+    if (runningFlush) clearTimeout(runningFlush);
+    runningFlush = null;
     const sampled = sampler ? sampler.stop() : { processes: [], connections: [] };
     try {
-      recordWrappedRun({
-        traceId: runTraceId,
-        program: basename(program),
-        pid: child.pid || null,
-        ppid: process.pid,
-        startedAt,
-        processes: sampled.processes,
-        connections: sampled.connections,
-      });
+      recordWrappedRun(Object.assign(wrappedRunInput(sampled), { exitCode, signal }));
     } catch (err) {
       const detail = err && err.message ? String(err.message).split("\n")[0] : "failed";
       process.stderr.write(`vantio run: could not write the run record: ${detail}\n`);
@@ -441,16 +519,20 @@ function runCommand(rest) {
   }
 
   child.on("error", (err) => {
+    stopForwarding();
     process.stderr.write(`vantio: failed to start '${program}': ${err.message}\n`);
-    saveWrappedRun();
+    saveWrappedRun(1, null);
     writeRunJson(1, null);
     process.exit(1);
   });
 
   child.on("exit", (code, signal) => {
-    saveWrappedRun();
+    stopForwarding();
+    saveWrappedRun(signal === null ? (code ?? 1) : null, signal);
     if (signal !== null) {
       writeRunJson(null, signal);
+      // Default disposition is back, so this ends us with the same signal.
+      // The shell reports 128 plus the signal number.
       process.kill(process.pid, signal);
       return;
     }
@@ -482,6 +564,12 @@ function col(str, width) {
 
 // ── prove helpers ─────────────────────────────────────────────────────────────────────────────
 function runsDir() { return join(configDir(), "runs"); }
+
+// "finished", "running" or "unfinished". A record marked running whose update
+// is older than 3 intervals (at least 15 s) is "unfinished": the program may
+// have crashed or been killed, and the record is its last update.
+function runStateName(log) { return runStateOf(log, Date.now()).state; }
+function runStateNote(log) { return describeRunState(runStateOf(log, Date.now())); }
 
 function parseSincePeriod(since) {
   if (since === "7d")  return 7  * 24 * 60 * 60 * 1000;
@@ -583,6 +671,7 @@ function generateHtmlReport(log) {
       <dt>Trace ID</dt>     <dd>${traceId}</dd>
       <dt>Run started</dt>  <dd>${startedAt}</dd>
       <dt>Generated</dt>    <dd>${genAt}</dd>
+      ${runStateNote(log) ? `<dt>Run state</dt>    <dd>${escHtml(runStateNote(log))}</dd>` : ""}
       <dt>Duration</dt>     <dd>${durationMs}</dd>
       <dt>Process ID</dt>   <dd>${pid}</dd>
       <dt>CLI version</dt>  <dd>@vantio/cli v${cliVer}</dd>
@@ -629,6 +718,7 @@ function proofJson(log) {
     started_at: log.started_at || null,
     generated_at: log.generated_at || null,
     duration_ms: log.duration_ms ?? null,
+    run_state: runStateName(log),
     cli_version: log.cli_version || null,
     opticsStatus: rollup.opticsStatus,
     applicationStatus: rollup.applicationStatus,
@@ -689,7 +779,7 @@ CLI v${log.cli_version || "—"}.
 | Trace ID | \`${log.trace_id || "—"}\` |
 | Run started | \`${log.started_at || "—"}\` |
 | Generated | \`${log.generated_at || new Date().toISOString()}\` |
-| Duration | \`${log.duration_ms != null ? `${Number(log.duration_ms).toLocaleString()} ms` : "—"}\` |
+${runStateNote(log) ? `| Run state | ${runStateNote(log)} |\n` : ""}| Duration | \`${log.duration_ms != null ? `${Number(log.duration_ms).toLocaleString()} ms` : "—"}\` |
 | Process ID | \`${log.pid || "—"}\` |
 | CLI version | \`@vantio/cli v${log.cli_version || "—"}\` |
 
@@ -765,7 +855,7 @@ function listRuns(dir) {
       ? new Date(log.generated_at).toISOString().replace("T", " ").slice(0, 19) + " UTC"
       : "—";
     process.stdout.write(
-      col(log.trace_id || "—", W.trace) + "  " +
+      col((log.trace_id || "—") + (runStateName(log) === "finished" ? "" : ` [${runStateName(log)}]`), W.trace) + "  " +
       col(calls, W.calls) + "  " +
       col(bytes != null && bytes > 0 ? bytes.toLocaleString() : "—", W.bytes) + "  " +
       col(date, W.date) + "\n"
@@ -945,6 +1035,8 @@ function discoverLocalCommand(since, hostFilter, asJson) {
 
   const hostMap = new Map();
   let scannedRuns = 0;
+  let runningRuns = 0;
+  let unfinishedRuns = 0;
   const hostNeedle = hostFilter ? String(hostFilter).toLowerCase() : "";
   for (const f of files) {
     const filePath = join(runsDir(), f);
@@ -956,6 +1048,9 @@ function discoverLocalCommand(since, hostFilter, asJson) {
       const log = loaded.json;
       if (log?.vantio_run_log !== "1" || !Array.isArray(log.calls)) continue;
       scannedRuns++;
+      const state = runStateName(log);
+      if (state === "running") runningRuns++;
+      else if (state === "unfinished") unfinishedRuns++;
       const ts = log.generated_at ? new Date(log.generated_at).getTime() : 0;
       for (const call of log.calls) {
         const h = call.hostname || "unknown";
@@ -975,6 +1070,8 @@ function discoverLocalCommand(since, hostFilter, asJson) {
       command: "discover",
       since,
       scanned_runs: scannedRuns,
+      running_runs: runningRuns,
+      unfinished_runs: unfinishedRuns,
       opticsStatus: hosts.length ? "SUCCESS" : "NOT_OBSERVED",
       applicationStatus: hosts.length ? "SUCCESS" : "NOT_OBSERVED",
       hosts: hosts.map((h) => ({
@@ -989,6 +1086,10 @@ function discoverLocalCommand(since, hostFilter, asJson) {
 
   process.stdout.write(`\nVantio Optics — local run history (last ${since})\n`);
   process.stdout.write(`  Scanned ${scannedRuns} run log(s) from ~/.vantio/runs\n`);
+  if (runningRuns) process.stdout.write(`  ${runningRuns} run(s) still running. Their calls so far are included.\n`);
+  if (unfinishedRuns) {
+    process.stdout.write(`  ${unfinishedRuns} run(s) unfinished: no update for a while, so the program may have crashed or been killed. Their last update is included.\n`);
+  }
 
   if (hosts.length === 0) {
     if (scannedRuns === 0) {
@@ -1405,6 +1506,7 @@ function runTotals(log) {
     total_calls: log.summary?.total_calls ?? calls.length,
     total_bytes: log.summary?.total_bytes ?? calls.reduce((a, c) => a + (c.bytes || 0), 0),
     hosts: hostRollup(log),
+    run_state: runStateName(log),
   };
 }
 
@@ -1455,8 +1557,8 @@ async function diffCommand(args) {
     .filter((row) => row.delta_calls !== 0 || row.delta_bytes !== 0);
 
   const result = {
-    a: { trace_id: a.trace_id, total_calls: a.total_calls, total_bytes: a.total_bytes, started_at: a.started_at },
-    b: { trace_id: b.trace_id, total_calls: b.total_calls, total_bytes: b.total_bytes, started_at: b.started_at },
+    a: { trace_id: a.trace_id, total_calls: a.total_calls, total_bytes: a.total_bytes, started_at: a.started_at, run_state: a.run_state },
+    b: { trace_id: b.trace_id, total_calls: b.total_calls, total_bytes: b.total_bytes, started_at: b.started_at, run_state: b.run_state },
     delta_calls: b.total_calls - a.total_calls,
     delta_bytes: b.total_bytes - a.total_bytes,
     hosts_added: added,
@@ -1472,6 +1574,11 @@ async function diffCommand(args) {
   process.stdout.write("\nRun diff (Optics · observe only)\n\n");
   process.stdout.write(`  A  ${a.trace_id || "—"}  ·  ${a.total_calls} call(s)  ·  ${(a.total_bytes || 0).toLocaleString()} bytes\n`);
   process.stdout.write(`  B  ${b.trace_id || "—"}  ·  ${b.total_calls} call(s)  ·  ${(b.total_bytes || 0).toLocaleString()} bytes\n`);
+  for (const [label, side] of [["A", a], ["B", b]]) {
+    if (side.run_state !== "finished") {
+      process.stdout.write(`  Note: run ${label} is ${side.run_state === "running" ? "still running" : "unfinished (no recent update)"}. Its totals are the last update.\n`);
+    }
+  }
   process.stdout.write(`  Δ  calls ${result.delta_calls >= 0 ? "+" : ""}${result.delta_calls}  ·  bytes ${result.delta_bytes >= 0 ? "+" : ""}${result.delta_bytes.toLocaleString()}\n\n`);
 
   if (added.length) {

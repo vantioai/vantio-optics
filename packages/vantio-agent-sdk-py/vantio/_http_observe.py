@@ -341,6 +341,7 @@ def _append(rec: dict[str, Any]) -> None:
     with _lock:
         _calls.append(rec)
     _note_live(rec)
+    _note_running(rec)
 
 
 def _clock_local(moment: datetime) -> str:
@@ -684,6 +685,11 @@ def _urllib_method(url: Any, data: Any) -> str:
     """
     try:
         if hasattr(url, "get_method"):
+            # A Request subclass can override get_method(). urllib sends what
+            # that returns, so ask it. The stock Request is handled below so
+            # that data passed to urlopen() next to a Request still counts.
+            if type(url).get_method is not urllib.request.Request.get_method:
+                return str(url.get_method()).upper()
             explicit = getattr(url, "method", None)
             if explicit:
                 return str(explicit).upper()
@@ -2117,18 +2123,133 @@ def _program_label(argv: Optional[list[str]] = None) -> str:
     return "python"
 
 
-def _write_run_log() -> None:
-    if not _calls or not _trace_id:
+_RUN_INTERVAL_DEFAULT_MS = 5000
+_RUN_INTERVAL_MIN_MS = 1000
+_RUN_INTERVAL_MAX_MS = 3600000
+_RUN_MIN_GAP_S = 0.25
+
+_run_write_lock = threading.Lock()
+_run_state_lock = threading.Lock()
+_run_closed = True
+_run_interval_ms = 0
+_run_last_write = 0.0
+_run_hosts_seen: set[str] = set()
+_run_stop: Optional[threading.Event] = None
+_run_thread: Optional[threading.Thread] = None
+_run_tmp_seq = 0
+
+
+def _run_record_interval_ms(value: Optional[str] = None) -> int:
+    """Milliseconds between running-record updates, from VANTIO_RUN_RECORD_INTERVAL_MS.
+
+    Default 5000. Values below 1000 become 1000. "0" or "off" turns the
+    running record off (returns 0). An unreadable value gives the default.
+    Same rule as the CLI.
+    """
+    if value is None:
+        value = os.environ.get("VANTIO_RUN_RECORD_INTERVAL_MS", "")
+    raw = str(value).strip().lower()
+    if raw == "":
+        return _RUN_INTERVAL_DEFAULT_MS
+    if raw in ("0", "off"):
+        return 0
+    if not raw.isdigit():
+        return _RUN_INTERVAL_DEFAULT_MS
+    return min(_RUN_INTERVAL_MAX_MS, max(_RUN_INTERVAL_MIN_MS, int(raw)))
+
+
+def start_running_record() -> None:
+    """Keep ~/.vantio/runs/<trace>.json up to date while the process runs.
+
+    The record carries run_state "running". The final record written by
+    uninstall() replaces it and has no run_state. Used by the process-wide
+    wrap (`vantio run python ...`), not by short shield() blocks. Only the
+    first process of a run writes it: a child that inherits the same trace id
+    leaves the parent's record alone.
+    """
+    global _run_closed, _run_interval_ms, _run_stop, _run_thread, _run_last_write
+    interval = _run_record_interval_ms()
+    if interval <= 0:
+        return
+    owner = os.environ.get("VANTIO_RUN_RECORD_OWNER_PID")
+    if owner and owner != str(os.getpid()):
+        return
+    os.environ["VANTIO_RUN_RECORD_OWNER_PID"] = str(os.getpid())
+    with _run_state_lock:
+        if _run_thread is not None:
+            return
+        _run_closed = False
+        _run_interval_ms = interval
+        _run_last_write = 0.0
+        _run_hosts_seen.clear()
+        stop = threading.Event()
+        _run_stop = stop
+
+    def loop() -> None:
+        while not stop.wait(interval / 1000.0):
+            _write_running()
+
+    thread = threading.Thread(target=loop, name="vantio-run-record", daemon=True)
+    _run_thread = thread
+    thread.start()
+
+
+def _stop_running_record() -> None:
+    global _run_closed, _run_stop, _run_thread
+    with _run_state_lock:
+        stop, thread = _run_stop, _run_thread
+        _run_stop = None
+        _run_thread = None
+    if stop is not None:
+        stop.set()
+    if thread is not None and thread is not threading.current_thread():
+        thread.join(timeout=2.0)
+
+
+def _write_running() -> None:
+    global _run_last_write
+    with _run_write_lock:
+        if _run_closed:
+            return
+        _run_last_write = time.monotonic()
+        _write_run_log(running=True)
+
+
+def _note_running(rec: dict[str, Any]) -> None:
+    """Write the running record now when a destination is new (at most 4 a second)."""
+    try:
+        if _run_closed:
+            return
+        host = str(rec.get("hostname") or "")
+        if not host or host in _run_hosts_seen:
+            return
+        _run_hosts_seen.add(host)
+        wait = _RUN_MIN_GAP_S - (time.monotonic() - _run_last_write)
+        if wait <= 0:
+            _write_running()
+            return
+        # Written less than 250 ms ago: write once when 250 ms have passed.
+        timer = threading.Timer(wait, _write_running)
+        timer.daemon = True
+        timer.start()
+    except Exception:
+        return
+
+
+def _write_run_log(running: bool = False) -> None:
+    global _run_tmp_seq
+    calls_now = list(_calls)
+    if not calls_now or not _trace_id:
         return
     try:
         home = os.environ.get("VANTIO_HOME") or os.path.join(os.path.expanduser("~"), ".vantio")
         runs = os.path.join(home, "runs")
         os.makedirs(runs, mode=0o700, exist_ok=True)
         now = datetime.now(timezone.utc)
-        hosts = sorted({c.get("hostname") or "unknown" for c in _calls})
-        mediations = sorted({c.get("mediation") or "python_urllib" for c in _calls})
-        optics_status, application_status = _rollup_status(_calls)
-        customer = summarize_customer_fields(_calls, application_status)
+        hosts = sorted({c.get("hostname") or "unknown" for c in calls_now})
+        mediations = sorted({c.get("mediation") or "python_urllib" for c in calls_now})
+        optics_status, application_status = _rollup_status(calls_now)
+        customer = summarize_customer_fields(calls_now, application_status)
         payload = {
             "vantio_run_log": "1",
             "schema_version": 2,
@@ -2149,9 +2270,10 @@ def _write_run_log() -> None:
             "mediation": ",".join(mediations),
             "started_at": datetime.fromtimestamp(_started_ms, timezone.utc).isoformat() if _started_ms else now.isoformat(),
             "generated_at": now.isoformat(),
-            "calls": list(_calls),
+            **({"run_state": "running", "update_interval_ms": _run_interval_ms} if running else {}),
+            "calls": calls_now,
             "summary": {
-                "total_calls": len(_calls),
+                "total_calls": len(calls_now),
                 "hosts": hosts,
                 "opticsStatus": optics_status,
                 "applicationStatus": application_status,
@@ -2164,15 +2286,34 @@ def _write_run_log() -> None:
         }
         safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in _trace_id)[:80]
         path = os.path.join(runs, f"{safe}.json")
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(payload, fh, indent=2)
-            fh.write("\n")
+        # Temp file in the same directory, then rename: a reader sees the old
+        # record or the new one, never half of one. The temp name does not end
+        # in .json.
+        _run_tmp_seq += 1
+        tmp = f"{path}.{os.getpid()}.{_run_tmp_seq}.tmp"
         try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, indent=2)
+                fh.write("\n")
+            os.replace(tmp, path)
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
     except Exception:
         return
+
+
+def _finish_run_log() -> None:
+    """Stop the running record, then write the final record that replaces it."""
+    global _run_closed
+    _stop_running_record()
+    with _run_write_lock:
+        _run_closed = True
+        _write_run_log()
 
 
 def install(trace_id: str) -> None:
@@ -2213,5 +2354,5 @@ def uninstall() -> None:
             _uninstall_pycurl()
             _uninstall_http_client()
             _uninstall_curl_spawn()
-            _write_run_log()
+            _finish_run_log()
             _reset_policy()

@@ -11,7 +11,7 @@ import atexit
 import os
 import uuid
 
-from vantio._http_observe import install, uninstall
+from vantio._http_observe import install, start_running_record, uninstall
 
 _installed = False
 
@@ -23,6 +23,7 @@ def install_process_wrap() -> None:
     tid = os.environ.get("VANTIO_TRACE_ID") or str(uuid.uuid4())
     os.environ.setdefault("VANTIO_TRACE_ID", tid)
     install(tid)
+    start_running_record()
     atexit.register(_shutdown)
     _installed = True
 
