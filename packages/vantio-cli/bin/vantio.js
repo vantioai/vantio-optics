@@ -15,6 +15,7 @@ const {
   PROVIDER_SDKS,
   humanStatus,
   displayCall,
+  countedCalls,
   rollupCalls,
   telemetryPosture,
   withSchema,
@@ -506,10 +507,7 @@ function formatBytes(n) {
 
 // Owner decision, option A (VAN-394): a call with no known host is listed,
 // but it is left out of the call count, the byte totals and the run status.
-function countedCalls(calls) {
-  return calls.filter((c) => c && c.hostname);
-}
-
+// The rule itself is countedCalls in optics-cx.cjs.
 function noHostNote(noHost) {
   return `Calls with no known host: ${noHost} (listed above, not counted in the summary)`;
 }
@@ -776,7 +774,7 @@ function listRuns(dir) {
   const div = "-".repeat(hdr.length);
   process.stdout.write(`${div}\n${hdr}\n${div}\n`);
   for (const { log } of entries) {
-    const calls = log.summary?.total_calls ?? (Array.isArray(log.calls) ? log.calls.length : "—");
+    const calls = log.summary?.total_calls ?? (Array.isArray(log.calls) ? countedCalls(log.calls).length : "—");
     const bytes = log.summary?.total_bytes;
     const date  = log.generated_at
       ? new Date(log.generated_at).toISOString().replace("T", " ").slice(0, 19) + " UTC"

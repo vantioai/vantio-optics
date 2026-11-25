@@ -324,20 +324,22 @@ test("a curl config is read up to 1 MiB: a URL after 200 KiB is recorded", { tim
   assert.deepEqual(readRun(t.home, trace).log.calls.map((c) => c.hostname), ["llm.example.test"]);
 });
 
-test("a URL after the first 1 MiB of a curl config is not recorded", { timeout: 20000 }, async () => {
+test("a URL after the first 1 MiB of a curl config is not read: the call is recorded with no host", { timeout: 20000 }, async () => {
   const trace = "van394cap1m";
   const content = "# pad\n".repeat(Math.ceil((1024 * 1024) / 6) + 1) + 'url = "https://llm.example.test/v1/late"\n';
   const t = await spawnOnce("curl", trace, regularFile(content));
   assert.equal(readFileSync(t.out, "utf8").length, content.length, "the child still reads the whole file");
-  assert.deepEqual(readRun(t.home, trace).log.calls, []);
+  // The part that was not read could hold a watched URL, so the call is kept
+  // with no host, as for a FIFO.
+  assertOneCallWithoutHost(t.home, trace, "curl", ["llm.example.test"]);
 });
 
-test("a wget list is read up to 64 KiB: a URL after that is not recorded", { timeout: 20000 }, async () => {
+test("a wget list is read up to 64 KiB: a URL after that is not read, and the call has no host", { timeout: 20000 }, async () => {
   const pad = "# pad\n".repeat(Math.ceil((64 * 1024) / 6) + 1);
   const early = await spawnOnce("wget", "van394listearly", regularFile("https://llm.example.test/v1/a\n" + pad));
   assert.deepEqual(readRun(early.home, "van394listearly").log.calls.map((c) => c.hostname), ["llm.example.test"]);
   const late = await spawnOnce("wget", "van394listlate", regularFile(pad + "https://llm.example.test/v1/a\n"));
-  assert.deepEqual(readRun(late.home, "van394listlate").log.calls, []);
+  assertOneCallWithoutHost(late.home, "van394listlate", "wget", ["llm.example.test"]);
 });
 
 // ── Owner decision, option A: a call with no known host is kept, and it is

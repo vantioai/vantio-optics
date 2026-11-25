@@ -303,3 +303,122 @@ Stand-in `curl -K` and `wget -i` with a FIFO (no writer), a symlink to it, a uni
 - The new wording has no sign-off yet.
 - Not run for this commit: Python 3.10, 3.11 and 3.12, macOS, Windows, the drift check, the 25-run writer-first repro (the writer-first tests in both suites pass).
 - GitHub CI did not run (billing lock, VAN-129).
+
+## 2026-11-25: review round 4 (findings 1 to 5 and 7)
+
+A fresh review failed `90632a0` with seven findings. This section covers the one commit on top of `90632a0` that answers findings 1 to 5 and 7. Finding 6 is tracked on VAN-459 and stays in the gap list.
+
+### What changed, by finding
+
+1. **`vantio run` rewrote the count.** After the child exits, `recordWrappedRun` (`bin/optics-features.cjs`) rewrites the run file. It set `summary.total_calls` to the number of rows, so no-host calls were counted again. There is now one rule, `countedCalls` in `bin/optics-cx.cjs`. The interceptor, `vantio.js`, and `recordWrappedRun` all use it. `recordWrappedRun` also writes `calls_without_host`. `vantio prove --list` uses it for a log with no summary. The MCP package cannot import the CLI, so it has a copy; a CLI test checks the two give the same result. Python has `_counted_calls` with the same rule.
+2. **A watched URL in a `-K` config was dropped when the command line had another URL.** curl contacts every URL on the command line and in each config. The curl parsers now collect candidates in this order: the URL `main` used, other URLs with a scheme, arguments with no scheme, then every `url` line of each `-K` config. The first watched candidate is recorded. One curl call is still one record.
+   - Rule for a file that could not be read in full (a FIFO, device or socket, or a file over the cap): if no watched host was found, the call is recorded with no host. This holds even when the command line has a URL to a host that is not watched, because the file could hold a watched URL. So `curl -K /dev/null -d abc example.com/x` is recorded with no host. The same rule applies to `-i` lists.
+3. **False records.**
+   - (a) A long option is now looked up as curl 8.5.0 does: by full name, or by a prefix that only one option starts with. If an option is unknown, or a prefix fits more than one, no argument without a scheme is read from that command line. URLs with a scheme and the no-host rule still apply. So an unknown option can cause a miss, never a record for a host curl did not call.
+   - (b) The option tables are now taken from `curl --help all` of the installed curl 8.5.0: 258 long options (137 with a value, 121 without) and 59 short ones. Short options with a value: `A C D E F H K P Q T U X Y b c d e h m o r t u w x y z`. `-h` was missing and is added. The 8.5.0 help prints `--proxy`, `--preproxy` (and so `-x`) and `--haproxy-clientip` with no `<value>`; each was checked with the installed curl and takes one. Four options from an earlier list that 8.5.0 does not have were removed (`ech`, `ip-tos`, `keepalive-cnt`, `vlan-priority`).
+   - (c) No-scheme entries in a list are read only for wget. Checked with the installed GNU Wget 1.21.4: `wget -i list` fetched a `host:port/path` entry over http. aria2c and httpie are not installed here, so their lists are back to the old rule (entries with a scheme only).
+4. **Node and Python read the same tokens.** Both patterns are ASCII only, name the same characters that end a URL, and must match to the end of the token. A trailing newline, a tab or a no-break space makes the token not a URL in both. One vector file is run by both test suites: `packages/vantio-cli/test/fixtures/van394-curl-vectors.json` and its copy `packages/vantio-agent-sdk-py/tests/van394_curl_vectors.json`. A test fails if the copies differ.
+5. **A file over the cap.** A `-K` config over 1 MiB, or a `-i` list over 64 KiB, counts as not read in full. If no watched URL was found in the part that was read, the call is recorded with no host.
+7. **`vantio coverage --json`.** A no-host entry in `connections` now has `"no_host": true`. No field was removed or renamed. The entry stays in the list.
+
+Corrections to this file and the pull request text: the round 2 text said `vantio prove` follows the summary, and the round 3 text said the run status and totals agree across readers. Under `vantio run` neither was true, because of finding 1. Both are true from this commit, and tests now go through `vantio run`.
+
+### Wording that a user sees
+
+No new wording in this commit. What changes is when existing text appears:
+
+| Where | Old (`90632a0`) | New |
+| --- | --- | --- |
+| `vantio prove --list`, `CALLS` column, a run made by `vantio run` with one no-host call | `1` | `0` |
+| `vantio prove`, `Total calls`, same run | `1` | `0` |
+| `vantio diff`, totals for such a run | count the no-host call | leave it out |
+| Run summary and readers, `curl -K <file not read in full>` plus a URL to a host that is not watched | nothing recorded | one call with no host, so `Calls with no known host: 1 (not counted above)` appears |
+| `vantio coverage --json`, a no-host connection | no marker | `"no_host": true` |
+
+### Tests
+
+- New file `packages/vantio-cli/test/van394-run-readers.test.js`, 11 tests. Eight go through `vantio run` for a no-host-only, a known-host-only and a mixed run, with a Node agent and a Python agent. Each checks the run file, the run summary text and the `run_summary` event (Node), `discover` (text, `--json`, `--host`), `prove` (md, html, `--json`, `--list`), `coverage` (text, `--json`), `destinations`, `diff`, and the MCP discover, list and prove.
+- Shared vectors: 66 commands. 16 are commands that `main` (`8bee543`) records; each still records the same host. Checked by running the vectors on `main`'s interceptor: 16 of 16 match.
+- `cli-config-fifo.test.js`: tests 11 and 12 now expect a no-host call for a file over the cap.
+- Python `test_van394_cli_config_fifo.py`: 30 tests (2 new): the shared vectors and the end-of-token rule.
+
+On a scratch copy of `90632a0` under `/tmp` with the new test files put in:
+
+| Test | On `90632a0` |
+| --- | --- |
+| `vantio run` no-host-only and mixed, Node and Python (4 tests) | fail |
+| `vantio run` known-host-only, Node and Python (2 tests) | pass: pure guards, a run with no no-host call was already right |
+| `vantio diff` on runs made by `vantio run`, Node and Python (2 tests) | fail (they need the runs above) |
+| The CLI and the MCP package count by the same rule | fail |
+| Shared vectors, Node | fail: 16 of 66 vectors differ (9 fixes, 7 false records) |
+| The two vector copies are the same file | pass: pure guard |
+| `cli-config-fifo.test.js` 11 and 12 | fail |
+| Python shared vectors; Python end-of-token rule | fail; fail |
+
+In the vector file, 21 of the 28 `guard` vectors and all 16 `main` vectors give the same result on `90632a0`. They guard behavior that must not change.
+
+### Commands
+
+Node 22.23.5, pnpm 11.13.0, Python 3.13.18, curl 8.5.0, GNU Wget 1.21.4, Linux. Run on this commit's source tree.
+
+| Command | rc | Result |
+| --- | --- | --- |
+| `pnpm --filter @vantio/cli run lint` | 0 | |
+| `pnpm --filter @vantio/cli run test` | 0 | 223 tests: 222 pass, 1 skipped, 0 fail |
+| `pnpm --filter @vantio/optics-mcp run lint` | 0 | |
+| `pnpm --filter @vantio/optics-mcp run test` | 0 | 10 pass |
+| `pnpm --filter @vantio/agent-sdk run test` | 0 | 42 pass |
+| `pnpm run test:python` | 0 | 158 tests, OK, 2 skipped |
+| `node --test test/*.test.js` (repository root) | 0 | 5 pass |
+| `node --test test/van394-run-readers.test.js` on the scratch copy of `90632a0` | 1 | 11 tests: 3 pass, 8 fail |
+| `node --test test/cli-config-fifo.test.js` on the scratch copy | 1 | 32 tests: 30 pass, 2 fail |
+| `python3 -m unittest tests.test_van394_cli_config_fifo` on the scratch copy | 1 | 30 tests: 2 failures |
+| Shared vectors on `main`'s interceptor (`8bee543`) | n/a | the 16 `main` vectors match |
+| AGENTS.md secret scan | 0 | no pattern matched |
+
+### The reviewer's command lines
+
+85 command lines from the review were run through the Node and the Python wrapper, before and after. Node and Python agree on all 85 after. 68 give the same result as before. The 17 that changed:
+
+| Case | Command | `90632a0` | This commit | Installed curl 8.5.0 |
+| --- | --- | --- | --- | --- |
+| U09 | `curl --url=api.openai.com/v1` | api.openai.com | nothing | none (rc 2) |
+| U10b | `curl --proto-default=https api.openai.com/v1` | api.openai.com | nothing | none (rc 2) |
+| U13 | `curl example.com api.openai.com/v1` | nothing | api.openai.com | example.com,api.openai.com |
+| U13b | `curl https://example.com api.openai.com/v1` | nothing | api.openai.com | api.openai.com |
+| U13c | `curl api.openai.com/v1 https://example.com` | nothing | api.openai.com | api.openai.com |
+| U16 | `curl example.com --next api.openai.com/v1` | nothing | api.openai.com | example.com,api.openai.com |
+| U16b | `curl -d x example.com -: api.openai.com/v1` | nothing | api.openai.com | example.com,api.openai.com |
+| U18b | `curl --dat abc api.openai.com/v1` | api.openai.com | nothing | none (rc 2) |
+| F14 | `curl --user-ag api.openai.com example.com` | api.openai.com | nothing | example.com |
+| F14b | `curl --refer api.openai.com/x example.com` | api.openai.com | nothing | example.com |
+| F14c | `curl --output-d api.openai.com example.com` | api.openai.com | nothing | example.com |
+| F15 | `curl -h api.openai.com` | api.openai.com | nothing | none (rc 0) |
+| F26 | `curl --ssl-sessions api.openai.com example.com` | api.openai.com | nothing | none (rc 2) |
+| A01 | `aria2c -i list1` | api.openai.com | nothing | not run |
+| G01 | `curl -K cfg-https example.com/x` | nothing | api.openai.com | example.com |
+| G02 | `curl -K cfg-https https://example.com/x` | nothing | api.openai.com | none (rc 35) |
+| G03 | `curl -K /dev/null -d abc example.com/x` | nothing | no host | example.com |
+
+The last column is from running the installed curl with every connection sent to a loopback server. It lists the hosts seen in the first lines of curl's log, so it is partial: for G01 and G02 curl also tried the config's https URL, which the plain-http loopback server could not answer. "none (rc 2)" means curl refused the command line.
+
+### FIFO shapes, re-run
+
+Stand-in `curl -K` and `wget -i` with a FIFO (no writer), a symlink to it, a unix socket and `/dev/stdin`, in Node and under `shield()` in Python. 8 spawns per runtime, each back in 11 ms or less. Each runtime recorded 8 calls with no host and `total_calls: 0`. The writer-first tests in both suites pass.
+
+### Gaps
+
+- On VAN-459, not in this commit: a trailing dot, `user:pw@host`, globbing in the host part, more than one record per curl call, `--next`, `--expand-url`, `-sK cfg` as a cluster, `url:` and `--url` lines in a config, `wget host/path` on the command line, a relative `-K` or `-i` path (it is resolved against the parent's directory), a URL past the cap, `curl -K -` on a pipe, `//dev/stdin`.
+- The option tables are those of curl 8.5.0. An option from a newer curl is unknown here, so a no-scheme URL on that command line is not read (a miss, not a false record). curl's hidden option names are not in `--help all`; a prefix that curl itself finds ambiguous because of one of them may be resolved here. curl refuses such a command line, so no call is made.
+- The old forms `--url=<url>` and `--config=<file>` are still read as before, although curl 8.5.0 refuses them.
+- A watched URL with a no-break space in it is not read (curl 8.5.0 does send that request). A URL with a scheme is matched as before, without the end-of-token rule.
+- A no-scheme call is recorded as http on port 80 unless `--proto-default https` is given.
+- With a file not read in full and a URL to a host that is not watched, a no-host call is now recorded where nothing was before. This follows the rule in finding 2.
+- `recordWrappedRun` does not rebuild `by_host`, `total_bytes` or the Python status fields. Calls it adds from the process table (`proc_socket`) have a host and 0 bytes; they are in `total_calls` and `hosts` but not in `by_host`, as before this PR.
+- The `vantio run --json` line on stdout (`"command":"run"`) reports the wrap itself, not the calls. It is unchanged.
+- Node records an IPv6 host as `[::1]` and Python as `::1`. This is older than this PR and has no vector.
+- A run log written before option A keeps its old `summary`.
+- aria2c and httpie are not installed here. Their no-scheme behavior was not checked, so it is not read.
+- The wording from rounds 2 and 3 has no sign-off yet.
+- Not run for this commit: Python 3.10, 3.11 and 3.12, macOS, Windows, the drift check, the 25-run writer-first repro.
+- GitHub CI did not run (billing lock, VAN-129).

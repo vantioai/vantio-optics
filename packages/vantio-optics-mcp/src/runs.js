@@ -53,8 +53,10 @@ export function listRunLogs(dir = runsDir()) {
 }
 
 // Owner decision, option A (VAN-394): a call with no known host is listed,
-// but it is left out of the call count and the byte totals.
-function countedCalls(calls) {
+// but it is left out of the call count and the byte totals. This package
+// does not depend on @vantio/cli, so this is a copy of countedCalls in the
+// CLI's optics-cx.cjs. A test in the CLI keeps the two in step.
+export function countedCalls(calls) {
   return calls.filter((c) => c && c.hostname);
 }
 

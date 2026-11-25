@@ -1640,20 +1640,22 @@ def _bytes_from_curl_form_value(value: Any, treat_at_as_file: bool, stdin_size: 
 # curl reads an argument with no scheme as host[:port][/path] and uses http
 # (VAN-394). A name that starts with ftp., dict., ldap., imap., smtp. or pop3.
 # is read by curl as that protocol, so it is not taken here.
+# The pattern is ASCII only and spells out the characters that end a URL, so
+# Node and Python read the same tokens the same way.
 _SCHEMELESS_URL_RE = re.compile(
-    r"^(localhost|(?:\d{1,3}\.){3}\d{1,3}|\[[0-9a-f:.]+\]"
+    r"(localhost|(?:[0-9]{1,3}\.){3}[0-9]{1,3}|\[[0-9a-f:.]+\]"
     r"|(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]*[a-z0-9])"
-    r"(?::\d{1,5})?(?:[/?#]\S*)?$",
+    r"(?::[0-9]{1,5})?"
+    "(?:[/?#][^\u0000-\u0020\u007f-\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]*)?",
     re.IGNORECASE | re.ASCII,
 )
-_SCHEMELESS_OTHER_PROTOCOL_RE = re.compile(r"^(?:ftp|dict|ldap|imap|smtp|pop3)\.", re.IGNORECASE)
-_HTTP_URL_RE = re.compile(r"^https?://", re.IGNORECASE)
-_ANY_SCHEME_RE = re.compile(r"^[a-z][a-z0-9+.-]*://", re.IGNORECASE)
+_SCHEMELESS_OTHER_PROTOCOL_RE = re.compile(r"(?:ftp|dict|ldap|imap|smtp|pop3)\.", re.IGNORECASE | re.ASCII)
+_HTTP_URL_RE = re.compile(r"https?://", re.IGNORECASE | re.ASCII)
 
 
 def _is_schemeless_url(token: str) -> bool:
     text = str(token or "")
-    return bool(_SCHEMELESS_URL_RE.match(text)) and not _SCHEMELESS_OTHER_PROTOCOL_RE.match(text)
+    return bool(_SCHEMELESS_URL_RE.fullmatch(text)) and not _SCHEMELESS_OTHER_PROTOCOL_RE.match(text)
 
 
 def _http_url_from_token(token: str, default_scheme: Optional[str]) -> Optional[str]:
@@ -1666,47 +1668,86 @@ def _http_url_from_token(token: str, default_scheme: Optional[str]) -> Optional[
     return None
 
 
-# curl options whose value is the next argument. A value is never a URL, so
-# `-o api.example.test` is not read as a call. Options the parser handles
-# itself (-d, -F, -T, -K, --url and their long forms) are listed too.
-_CURL_SHORT_WITH_VALUE = "AbcCdDeEFHKmoPQrtTuUwxXyYz"
+# Every option in `curl --help all` of curl 8.5.0, split by whether it takes a
+# value. A value is never a URL, so `-o api.example.test` is not read as a
+# call. The help prints --proxy, --preproxy and --haproxy-clientip with no
+# <value>, but they take one.
+_CURL_SHORT_WITH_VALUE = "ACDEFHKPQTUXYbcdehmortuwxyz"
+_CURL_SHORT_NO_VALUE = "#012346:BGIJLMNORSVZafgijklnpqsv"
 _CURL_LONG_WITH_VALUE = frozenset((
-    "abstract-unix-socket", "alt-svc", "aws-sigv4", "cacert", "capath", "cert", "cert-type", "ciphers",
-    "config", "connect-timeout", "connect-to", "continue-at", "cookie", "cookie-jar", "create-file-mode",
-    "crlfile", "curves", "data", "data-ascii", "data-binary", "data-raw", "data-urlencode", "delegation",
-    "dns-interface", "dns-ipv4-addr", "dns-ipv6-addr", "dns-servers", "doh-url", "dump-header", "ech",
-    "egd-file", "engine", "etag-compare", "etag-save", "expect100-timeout", "form", "form-string",
-    "ftp-account", "ftp-alternative-to-user", "ftp-method", "ftp-port", "ftp-ssl-ccc-mode",
-    "happy-eyeballs-timeout-ms", "haproxy-clientip", "header", "hostpubmd5", "hostpubsha256", "hsts",
-    "interface", "ip-tos", "ipfs-gateway", "json", "keepalive-cnt", "keepalive-time", "key", "key-type",
-    "krb", "libcurl", "limit-rate", "local-port", "login-options", "mail-auth", "mail-from", "mail-rcpt",
-    "max-filesize", "max-redirs", "max-time", "netrc-file", "noproxy", "oauth2-bearer", "output",
-    "output-dir", "parallel-max", "pass", "pinnedpubkey", "preproxy", "proto", "proto-default",
-    "proto-redir", "proxy", "proxy-cacert", "proxy-capath", "proxy-cert", "proxy-cert-type",
-    "proxy-ciphers", "proxy-crlfile", "proxy-header", "proxy-key", "proxy-key-type", "proxy-pass",
-    "proxy-pinnedpubkey", "proxy-service-name", "proxy-tls13-ciphers", "proxy-tlsauthtype",
-    "proxy-tlspassword", "proxy-tlsuser", "proxy-user", "proxy1.0", "pubkey", "quote", "random-file",
-    "range", "rate", "referer", "request", "request-target", "resolve", "retry", "retry-delay",
-    "retry-max-time", "sasl-authzid", "service-name", "socks4", "socks4a", "socks5",
-    "socks5-gssapi-service", "socks5-hostname", "speed-limit", "speed-time", "stderr", "telnet-option",
-    "tftp-blksize", "time-cond", "tls-max", "tls13-ciphers", "tlsauthtype", "tlspassword", "tlsuser",
-    "trace", "trace-ascii", "trace-config", "unix-socket", "upload-file", "url", "url-query", "user",
-    "user-agent", "variable", "vlan-priority", "write-out",
-))
+    "abstract-unix-socket alt-svc aws-sigv4 cacert capath cert cert-type ciphers config connect-timeout "
+    "connect-to continue-at cookie cookie-jar create-file-mode crlfile curves data data-ascii "
+    "data-binary data-raw data-urlencode delegation dns-interface dns-ipv4-addr dns-ipv6-addr "
+    "dns-servers doh-url dump-header egd-file engine etag-compare etag-save expect100-timeout form "
+    "form-string ftp-account ftp-alternative-to-user ftp-method ftp-port ftp-ssl-ccc-mode "
+    "happy-eyeballs-timeout-ms haproxy-clientip header help hostpubmd5 hostpubsha256 hsts interface "
+    "ipfs-gateway json keepalive-time key key-type krb libcurl limit-rate local-port login-options "
+    "mail-auth mail-from mail-rcpt max-filesize max-redirs max-time netrc-file noproxy oauth2-bearer "
+    "output output-dir parallel-max pass pinnedpubkey preproxy proto proto-default proto-redir proxy "
+    "proxy-cacert proxy-capath proxy-cert proxy-cert-type proxy-ciphers proxy-crlfile proxy-header "
+    "proxy-key proxy-key-type proxy-pass proxy-pinnedpubkey proxy-service-name proxy-tls13-ciphers "
+    "proxy-tlsauthtype proxy-tlspassword proxy-tlsuser proxy-user proxy1.0 pubkey quote random-file "
+    "range rate referer request request-target resolve retry retry-delay retry-max-time sasl-authzid "
+    "service-name socks4 socks4a socks5 socks5-gssapi-service socks5-hostname speed-limit speed-time "
+    "stderr telnet-option tftp-blksize time-cond tls-max tls13-ciphers tlsauthtype tlspassword tlsuser "
+    "trace trace-ascii trace-config unix-socket upload-file url url-query user user-agent variable "
+    "write-out "
+).split())
+_CURL_LONG_NO_VALUE = frozenset((
+    "anyauth append basic ca-native cert-status compressed compressed-ssh create-dirs crlf digest "
+    "disable disable-eprt disable-epsv disallow-username-in-url doh-cert-status doh-insecure fail "
+    "fail-early fail-with-body false-start form-escape ftp-create-dirs ftp-pasv ftp-pret "
+    "ftp-skip-pasv-ip ftp-ssl-ccc ftp-ssl-control get globoff haproxy-protocol head http0.9 http1.0 "
+    "http1.1 http2 http2-prior-knowledge http3 http3-only ignore-content-length include insecure ipv4 "
+    "ipv6 junk-session-cookies list-only location location-trusted mail-rcpt-allowfails manual metalink "
+    "negotiate netrc netrc-optional next no-alpn no-buffer no-clobber no-keepalive no-npn "
+    "no-progress-meter no-sessionid ntlm ntlm-wb parallel parallel-immediate path-as-is post301 post302 "
+    "post303 progress-bar proxy-anyauth proxy-basic proxy-ca-native proxy-digest proxy-http2 "
+    "proxy-insecure proxy-negotiate proxy-ntlm proxy-ssl-allow-beast proxy-ssl-auto-client-cert "
+    "proxy-tlsv1 proxytunnel raw remote-header-name remote-name remote-name-all remote-time "
+    "remove-on-error retry-all-errors retry-connrefused sasl-ir show-error silent socks5-basic "
+    "socks5-gssapi socks5-gssapi-nec ssl ssl-allow-beast ssl-auto-client-cert ssl-no-revoke ssl-reqd "
+    "ssl-revoke-best-effort sslv2 sslv3 styled-output suppress-connect-headers tcp-fastopen tcp-nodelay "
+    "tftp-no-options tlsv1 tlsv1.0 tlsv1.1 tlsv1.2 tlsv1.3 tr-encoding trace-ids trace-time use-ascii "
+    "verbose version xattr "
+).split())
 
 
-def _curl_option_takes_next_arg(a: str) -> bool:
+def _curl_long_option_kind(name: str) -> Optional[str]:
+    """Return "value", "flag", or None.
+
+    curl takes a long option by its full name or by a prefix that only one
+    option starts with. A name that is unknown, or a prefix that fits more
+    than one option, gives None: the caller must not guess.
+    """
+    if name in _CURL_LONG_WITH_VALUE:
+        return "value"
+    if name in _CURL_LONG_NO_VALUE:
+        return "flag"
+    if not name:
+        return None
+    hits = [("value", n) for n in _CURL_LONG_WITH_VALUE if n.startswith(name)]
+    hits += [("flag", n) for n in _CURL_LONG_NO_VALUE if n.startswith(name)]
+    if len(hits) == 1:
+        return hits[0][0]
+    if not hits and name.startswith("no-") and name[3:] in _CURL_LONG_NO_VALUE:
+        return "flag"
+    return None
+
+
+def _curl_option_shape(a: str) -> tuple[bool, bool]:
+    """For an argument that starts with "-": (known, value is the next argument)."""
     if a.startswith("--"):
-        if "=" in a:
-            return False
-        name = a[2:]
-        return name in _CURL_LONG_WITH_VALUE or name.startswith("expand-")
+        kind = _curl_long_option_kind(a[2:])
+        return kind is not None, kind == "value"
     # A short cluster such as -sSo: the first letter that takes a value ends
     # it. The value is the rest of the argument, or the next argument.
     for j in range(1, len(a)):
         if a[j] in _CURL_SHORT_WITH_VALUE:
-            return j == len(a) - 1
-    return False
+            return True, j == len(a) - 1
+        if a[j] not in _CURL_SHORT_NO_VALUE:
+            return False, False
+    return True, False
 
 
 def _curl_default_scheme(proto_default: Optional[str]) -> Optional[str]:
@@ -1721,7 +1762,11 @@ def _urls_from_list_file(
     stdin_size: int = 0,
     kwargs: Optional[dict[str, Any]] = None,
     skipped: Optional[list[str]] = None,
+    schemeless: bool = False,
 ) -> list[str]:
+    # `schemeless` is true only for wget, which reads an entry with no scheme
+    # as http (checked with GNU Wget 1.21.4). aria2c and httpie lists keep the
+    # old rule: only entries with a scheme.
     cap = _CLI_LIST_CAP
     max_urls = 32
     text = ""
@@ -1760,7 +1805,7 @@ def _urls_from_list_file(
         if not s or s.startswith("#"):
             continue
         token = s.split()[0]
-        found = _http_url_from_token(token, "http")
+        found = _http_url_from_token(token, "http" if schemeless else None)
         if found:
             urls.append(found)
         if len(urls) >= max_urls:
@@ -1803,7 +1848,9 @@ def _read_regular_file(path: str, cap: int, skipped: Optional[list[str]] = None)
     is still non-blocking and checked again with fstat, in case the path
     changed after the stat; then it is closed without a read.
 
-    A FIFO, device or socket is added to ``skipped``. /dev/stdin, /dev/fd/N
+    A FIFO, device or socket is added to ``skipped``. So is a regular file
+    larger than the cap: the part that was not read could hold a URL.
+    /dev/stdin, /dev/fd/N
     and /proc/self/fd/N name the child's descriptors once it runs; here they
     would name ours, so they are never opened.
     """
@@ -1821,9 +1868,12 @@ def _read_regular_file(path: str, cap: int, skipped: Optional[list[str]] = None)
     flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOCTTY", 0)
     fd = os.open(path, flags)
     try:
-        mode = os.fstat(fd).st_mode
+        opened = os.fstat(fd)
+        mode = opened.st_mode
         if not stat.S_ISREG(mode):
             return skip() if _is_special_file(mode) else None
+        if opened.st_size > cap and skipped is not None:
+            skipped.append(path)
         chunks: list[bytes] = []
         left = cap
         while left > 0:
@@ -1837,13 +1887,15 @@ def _read_regular_file(path: str, cap: int, skipped: Optional[list[str]] = None)
         os.close(fd)
 
 
-def _url_from_curl_config(path: str, skipped: Optional[list[str]] = None) -> Optional[str]:
+def _urls_from_curl_config(path: str, skipped: Optional[list[str]] = None) -> list[str]:
+    """Every `url` line of a curl config, in order (at most 32)."""
+    urls: list[str] = []
     try:
         raw = _read_regular_file(str(path), _CLI_CONFIG_CAP, skipped)
     except Exception:
-        return None
+        return urls
     if raw is None:
-        return None
+        return urls
     for line in raw.decode("utf-8", "replace").splitlines():
         s = line.strip()
         if not s or s.startswith("#"):
@@ -1855,9 +1907,16 @@ def _url_from_curl_config(path: str, skipped: Optional[list[str]] = None) -> Opt
             rest = rest[1:].strip()
         rest = rest.strip("\"'")
         found = _http_url_from_token(rest, "http")
-        if found:
-            return found
-    return None
+        if found and found not in urls:
+            urls.append(found)
+        if len(urls) >= 32:
+            break
+    return urls
+
+
+def _url_from_curl_config(path: str, skipped: Optional[list[str]] = None) -> Optional[str]:
+    urls = _urls_from_curl_config(path, skipped)
+    return urls[0] if urls else None
 
 
 def _parse_curl_argv(
@@ -1865,9 +1924,13 @@ def _parse_curl_argv(
 ) -> tuple[list[str], int]:
     url: Optional[str] = None
     data_bytes = 0
-    # The first argument with no scheme that is not an option value, the index
-    # of the next option value, and the --proto-default value.
-    bare: Optional[str] = None
+    # curl contacts every URL on the command line and in each -K config.
+    # `url` is the one URL the parser has always used. The rest are kept as
+    # further candidates; the caller records the first one that is watched.
+    schemed: list[str] = []
+    bare: list[str] = []
+    bare_reliable = True
+    no_more_options = False
     value_at = -1
     proto_default: Optional[str] = None
     config_paths: list[str] = []
@@ -1877,6 +1940,8 @@ def _parse_curl_argv(
         a = args[i]
         if a in ("--url", "-url"):
             url = args[i + 1] if i + 1 < len(args) else None
+            if url is not None and _is_schemeless_url(url):
+                bare.append(url)
             i += 2
             continue
         if a.startswith("--url="):
@@ -1943,32 +2008,47 @@ def _parse_curl_argv(
             i += 1
             continue
         if _HTTP_URL_RE.match(a):
-            if url is None:
+            if not url:
                 url = a
-        elif a.startswith("-") and len(a) > 1:
+            schemed.append(a)
+        elif not no_more_options and a == "--":
+            no_more_options = True
+        elif not no_more_options and a.startswith("-") and len(a) > 1:
             if a == "--proto-default" and i + 1 < len(args):
                 proto_default = args[i + 1]
-            elif a.startswith("--proto-default="):
-                proto_default = a[len("--proto-default="):]
-            if _curl_option_takes_next_arg(a):
+            known, takes_next = _curl_option_shape(a)
+            # An option this table does not know, or a prefix that fits more
+            # than one option: its value cannot be told from a URL. No
+            # argument with no scheme is read from this command line then.
+            if not known:
+                bare_reliable = False
+            elif takes_next:
                 value_at = i + 1
-        elif i != value_at and bare is None and _is_schemeless_url(a):
-            bare = a
+        elif i != value_at and _is_schemeless_url(a):
+            bare.append(a)
         i += 1
-    # A URL with no scheme: curl reads it as host[:port][/path] over http, or
-    # over --proto-default. One with a scheme wins, as before.
+    # Candidates, in order: the URL the parser has always used, other URLs
+    # with a scheme, arguments with no scheme (curl reads them as
+    # host[:port][/path] over http, or over --proto-default), then the URLs of
+    # each -K config.
+    candidates: list[str] = []
+
+    def add(found: Optional[str]) -> None:
+        if found and found not in candidates:
+            candidates.append(found)
+
+    if url and _HTTP_URL_RE.match(url):
+        add(url)
+    for found in schemed:
+        add(found)
     scheme = _curl_default_scheme(proto_default)
-    if url and not _ANY_SCHEME_RE.match(url):
-        url = _http_url_from_token(url, scheme) or url
-    if not url and bare and scheme:
-        url = f"{scheme}://{bare}"
-    if not url:
-        for path in config_paths:
-            found = _url_from_curl_config(path, skipped)
-            if found:
-                url = found
-                break
-    return ([url] if url else []), data_bytes
+    if bare_reliable and scheme:
+        for found in bare:
+            add(f"{scheme}://{found}")
+    for path in config_paths:
+        for found in _urls_from_curl_config(path, skipped):
+            add(found)
+    return candidates, data_bytes
 
 
 def _take_input_file_arg(args: list[str], i: int, a: str) -> Optional[tuple[str, int]]:
@@ -2031,7 +2111,7 @@ def _parse_wget_argv(
     if url:
         urls.append(url)
     for path in list_paths:
-        for found in _urls_from_list_file(path, stdin_size, kwargs, skipped):
+        for found in _urls_from_list_file(path, stdin_size, kwargs, skipped, True):
             if found not in urls:
                 urls.append(found)
     return urls, data_bytes
@@ -2098,13 +2178,7 @@ def _apply_cli_gate(
     skipped: list[str] = []
     urls, data_bytes = _parse_cli_argv(tool, argv, kwargs, skipped)
     mediation = _cli_mediation(tool)
-    if not urls:
-        # The only URL is in a FIFO, device or socket that the child alone may
-        # read (VAN-394). Record the call with no host. It adds no spend, and
-        # the run summary leaves it out of the call count.
-        if skipped:
-            _record(None, "OBSERVED", mediation, path=None, bytes_observed=data_bytes)
-        return
+    recorded = 0
     for url in urls:
         hostname, port, path = _host_port_from_url(url)
         if _decide(hostname, port, path, data_bytes) != "observe":
@@ -2117,6 +2191,17 @@ def _apply_cli_gate(
             bytes_observed=data_bytes,
         )
         _spent_usd += (data_bytes or 0) * _USD_PER_BYTE
+        recorded += 1
+        # One curl call is one record: the first watched URL.
+        if tool == "curl":
+            break
+    # No watched host was found, and a -K or -i file could not be read in
+    # full: a FIFO, device or socket that the child alone may read, or a file
+    # over the cap (VAN-394). That file could hold a watched URL, so the call
+    # is recorded with no host. It adds no spend, and the run summary leaves
+    # it out of the call count.
+    if recorded == 0 and skipped:
+        _record(None, "OBSERVED", mediation, path=None, bytes_observed=data_bytes)
 
 
 class _VantioPopen(subprocess.Popen):
@@ -2306,6 +2391,16 @@ def _program_label(argv: Optional[list[str]] = None) -> str:
     return "python"
 
 
+def _counted_calls(calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The one rule for what counts (owner decision, option A, VAN-394).
+
+    A call with no known host stays in `calls`, but it is left out of the
+    call count, the host list and the run status. This is the same rule as
+    countedCalls in the CLI's optics-cx.cjs.
+    """
+    return [c for c in calls if c and c.get("hostname")]
+
+
 def _write_run_log() -> None:
     if not _calls or not _trace_id:
         return
@@ -2317,7 +2412,7 @@ def _write_run_log() -> None:
         # Owner decision, option A (VAN-394): a call with no known host stays
         # in `calls`, but it is left out of the call count. It is shown as its
         # own count instead.
-        counted = [c for c in _calls if c.get("hostname")]
+        counted = _counted_calls(_calls)
         hosts = sorted({c["hostname"] for c in counted})
         mediations = sorted({c.get("mediation") or "python_urllib" for c in _calls})
         optics_status, application_status = _rollup_status(counted)

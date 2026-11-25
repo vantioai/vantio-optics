@@ -26,7 +26,7 @@ const dgram = require("node:dgram");
 const net = require("node:net");
 const { parseArgs } = require("node:util");
 
-const { SCHEMA_STATUS, normalizeHttpStatus, withSchema } = require("./optics-cx.cjs");
+const { SCHEMA_STATUS, countedCalls, normalizeHttpStatus, withSchema } = require("./optics-cx.cjs");
 const { LLM_HOSTS, catalogInScope } = require("./llm-hosts.cjs");
 const { discoverUncovered } = require("./optics-proc.cjs");
 const { deliverOtlpGrpc } = require("./optics-otlp-grpc.cjs");
@@ -734,6 +734,9 @@ function buildCoverage(input) {
       authority,
       mediation: observation.mediation,
       system_hostname: bucket.hostname,
+      // Only set on a call with no known host. Such an entry is not in
+      // counts.connections.
+      no_host: observation.no_host ? true : undefined,
       tool_name_retained: observation.kind === "mcp_tool" ? observation.tool_name_retained : undefined,
     };
     connections.push(connection);
@@ -1897,8 +1900,11 @@ function recordWrappedRun(input) {
     generated_at: stamp,
     calls,
     processes,
+    // The same counting rule as the runtime that wrote the file (VAN-394): a
+    // call with no known host is left out of the count and counted apart.
     summary: Object.assign({}, existing && existing.summary, {
-      total_calls: calls.length,
+      total_calls: countedCalls(calls).length,
+      calls_without_host: calls.length - countedCalls(calls).length,
       hosts,
     }),
     socket_observation: "read_only_proc",

@@ -518,6 +518,83 @@ class FakeToolUnderShieldTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(log["summary"]["opticsStatus"], "SUCCESS")
 
 
+class SharedVectorTests(unittest.IsolatedAsyncioTestCase):
+    """The curl / wget / aria2c vectors that the Node tests run too."""
+
+    def setUp(self) -> None:
+        with open(_VECTORS_PATH, encoding="utf-8") as fh:
+            self.doc = json.load(fh)
+        self.work = tempfile.mkdtemp()
+        self.home = os.path.join(self.work, "home")
+        os.mkdir(self.home)
+        bin_dir = os.path.join(self.work, "bin")
+        os.mkdir(bin_dir)
+        for name in ("curl", "wget", "aria2c"):
+            path = os.path.join(bin_dir, name)
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write("#!/bin/sh\nexit 0\n")
+            os.chmod(path, 0o755)
+        self.files = os.path.join(self.work, "files")
+        os.mkdir(self.files)
+        for name, spec in self.doc["files"].items():
+            path = os.path.join(self.files, name)
+            if spec.get("fifo"):
+                os.mkfifo(path)
+                continue
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(spec.get("text", "") + spec.get("repeat", "") * spec.get("times", 0) + spec.get("then", ""))
+        patch = mock.patch.dict(
+            os.environ,
+            {
+                "VANTIO_HOME": self.home,
+                "VANTIO_EXTRA_LLM_HOSTS": f"{self.doc['watched']},{self.doc['mark']}",
+                "PATH": bin_dir + os.pathsep + os.environ.get("PATH", ""),
+            },
+        )
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    async def test_each_command_records_the_hosts_the_vector_file_names(self) -> None:
+        mark = self.doc["mark"]
+        vectors = self.doc["vectors"]
+
+        def body() -> None:
+            for vector in vectors:
+                argv = [a.replace("{dir}", self.files) for a in vector["argv"]]
+                for command in ([vector["tool"], *argv], ["curl", f"https://{mark}/"]):
+                    subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+
+        async with shield(trace_id="van394-vectors"):
+            worker = threading.Thread(target=body, daemon=True)
+            worker.start()
+            worker.join(90)
+            self.assertFalse(worker.is_alive(), "a spawn blocked")
+        with open(os.path.join(self.home, "runs", "van394-vectors.json"), encoding="utf-8") as fh:
+            log = json.load(fh)
+        per_vector: list = [[]]
+        for call in log["calls"]:
+            if call["hostname"] == mark:
+                per_vector.append([])
+            else:
+                per_vector[-1].append(call["hostname"])
+        per_vector.pop()
+        self.assertEqual(len(per_vector), len(vectors), "one mark call per vector")
+        wrong = [
+            f"[{v['group']}] {v['name']}: {v['tool']} {v['argv']} recorded {got}, expected {v['hosts']}"
+            for v, got in zip(vectors, per_vector)
+            if got != v["hosts"]
+        ]
+        self.assertEqual(wrong, [])
+
+    def test_a_token_with_no_scheme_must_match_to_its_end(self) -> None:
+        host = self.doc["watched"]
+        self.assertTrue(_http_observe._is_schemeless_url(f"{host}/v1"))
+        for tail in ("\n", "\r\n", "\u00a0x", "\tx", " x", "\u2028"):
+            self.assertFalse(_http_observe._is_schemeless_url(f"{host}/v1{tail}"), repr(tail))
+            self.assertFalse(_http_observe._is_schemeless_url(f"{host}{tail}"), repr(tail))
+
+
+_VECTORS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "van394_curl_vectors.json")
 _NO_HOST_ARGV = ["-K", "/dev/null", "-d", "x" * 5000]
 _KNOWN_HOST_ARGV = ["-d", "y" * 300, "https://llm.example.test/v1/x"]
 
