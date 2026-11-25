@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { cpSync, mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -265,13 +265,27 @@ def done():
     print("RESULT " + json.dumps(out))
 `;
 
+// The wrapper finds `node` once, when Python starts. So the tests put their
+// own `node` first on PATH before the start: a script that runs
+// $HOME/fake-bin/node.impl when the agent has written one, and the real node
+// otherwise. VANTIO_MCP_POLICY is fixed at the start too; it names a file in
+// $HOME that does not exist until an agent writes it.
+function fakeBin(home) {
+  const dir = join(home, "fake-bin");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "node"), '#!/bin/sh\nd="${0%/*}"\nif [ -x "$d/node.impl" ]; then exec "$d/node.impl" "$@"; fi\nexec "$REAL_NODE" "$@"\n');
+  chmodSync(join(dir, "node"), 0o755);
+  return dir;
+}
+
 async function runAgent(body, enforce, extraEnv = {}) {
   const home = mkdtempSync(join(tmpdir(), "van393-fix-"));
   const agent = join(home, "agent.py");
   writeFileSync(agent, `${PRELUDE}\n${body}\ndone()\n`);
   try {
     const args = enforce ? ["run", "--mcp-enforce", "python3", agent] : ["run", "python3", agent];
-    const { code, stdout, stderr } = await runCli(args, { HOME: home, FRAME, REAL_NODE: process.execPath, ...extraEnv });
+    const PATH = `${fakeBin(home)}:${process.env.PATH}`;
+    const { code, stdout, stderr } = await runCli(args, { HOME: home, FRAME, REAL_NODE: process.execPath, VANTIO_MCP_POLICY: join(home, "policy.json"), ...extraEnv, PATH });
     assert.equal(code, 0, stderr);
     const logPath = join(home, ".vantio", "mcp-observations.jsonl");
     return { out: result(stdout), log: existsSync(logPath) ? readFileSync(logPath, "utf8") : "", stderr };
@@ -518,18 +532,23 @@ test("a str written to a binary pipe raises TypeError, as in plain Python", { sk
 });
 
 // Fixes after the independent review of 20db6af (N1, N3, N5, N6, N8).
-// fake_node() puts a `node` first on PATH that notes each start in a file,
-// waits, then runs the real node. The count shows whether the helper ran.
+// fake_node() makes the `node` on PATH note each start in a file, wait, then
+// run the real node. The count shows whether the helper ran.
 const FAKE_NODE = String.raw`
 import stat
+IMPL = os.path.join(os.environ["HOME"], "fake-bin", "node.impl")
+def node_impl(script):
+    """What the node on PATH runs from now on. None: the real node."""
+    if os.path.exists(IMPL):
+        os.remove(IMPL)
+    if script is not None:
+        with open(IMPL + ".new", "w") as fh:
+            fh.write("#!/bin/sh\n" + script)
+        os.chmod(IMPL + ".new", 0o755)
+        os.rename(IMPL + ".new", IMPL)
 def fake_node(delay):
-    d = os.path.join(os.environ["HOME"], "fake-bin")
-    os.makedirs(d, exist_ok=True)
-    count = os.path.join(d, "starts")
-    with open(os.path.join(d, "node"), "w") as fh:
-        fh.write('#!/bin/sh\necho start >> "%s"\nsleep %s\nexec "%s" "$@"\n' % (count, delay, os.environ["REAL_NODE"]))
-    os.chmod(os.path.join(d, "node"), 0o755)
-    os.environ["PATH"] = d + os.pathsep + os.environ["PATH"]
+    count = os.path.join(os.environ["HOME"], "fake-bin", "starts")
+    node_impl('echo start >> "%s"\nsleep %s\nexec "%s" "$@"\n' % (count, delay, os.environ["REAL_NODE"]))
     return count
 def starts(count):
     return len(open(count).read().splitlines()) if os.path.exists(count) else 0
@@ -748,8 +767,8 @@ test("writelines() on a closed stdin raises ValueError with plain Python's text"
 
 // Fixes after the independent review of 7b2daba (findings 1, 2, 3 and 6).
 
-// Finding 1. bad_node() puts a `node` first on PATH that reads its input and
-// then answers in a way the real helper never does for a line it lets through.
+// Finding 1. bad_node() makes the `node` on PATH read its input and then
+// answer in a way the real helper never does for a line it lets through.
 const HELPER_FAIL_AGENT = String.raw`
 ALLOW = '{"records":[{"schema":"vantio.mcp_observation.v1","decision":{"action":"ALLOW","reason":"allow"}}],"error":null}'
 KINDS = {
@@ -761,15 +780,10 @@ KINDS = {
     "allow_but_exit_1": "cat >/dev/null\nprintf '%s' '" + ALLOW + "'\nexit 1\n",
     "garbage_exit_3": "cat >/dev/null\necho 'garbage<<>>'\nexit 3\n",
     "not_executable_output": "cat >/dev/null\nprintf '[]'\n",
+    # WOULD_BLOCK is an observe-mode answer. In enforce it is not an allow.
+    "would_block_record": "cat >/dev/null\nprintf '{\"records\":[{\"schema\":\"vantio.mcp_observation.v1\",\"decision\":{\"action\":\"WOULD_BLOCK\"}}],\"error\":null}'\n",
 }
-PATH0 = os.environ["PATH"]
-def bad_node(script):
-    d = os.path.join(os.environ["HOME"], "bad-bin")
-    os.makedirs(d, exist_ok=True)
-    with open(os.path.join(d, "node"), "w") as fh:
-        fh.write("#!/bin/sh\n" + script)
-    os.chmod(os.path.join(d, "node"), 0o755)
-    os.environ["PATH"] = d + os.pathsep + PATH0
+bad_node = node_impl
 def both(data):
     o = piped(data)
     r = subprocess.run(["cat"], input=data, capture_output=True).stdout.decode("utf-8", "replace")
@@ -782,21 +796,16 @@ for kind, script in KINDS.items():
     out[kind] = both(line)
 plain = b'before\n{"a":1}\n[1,2]\nafter\n'
 out["plain_with_bad_node"] = both(plain)
-os.environ["PATH"] = PATH0
-os.environ["NODE_OPTIONS"] = "--no-such-flag-van393"
-out["bad_node_options"] = both(line)
-del os.environ["NODE_OPTIONS"]
+node_impl(None)
 out["real_block"] = both(line)
-policy = os.path.join(os.environ["HOME"], "policy.json")
-with open(policy, "w") as fh:
+with open(os.environ["VANTIO_MCP_POLICY"], "w") as fh:
     json.dump({"servers": {"cat": {"default": "allow"}}}, fh)
-os.environ["VANTIO_MCP_POLICY"] = policy
 out["real_allow"] = both(b'before\n{"jsonrpc":"2.0","id":1,"method":"ping"}\nafter\n')
 `;
 
 test("--mcp-enforce withholds a frame when the helper gives no usable answer; a real allow answer still passes", { skip: !HAS_PY, timeout: 120000 }, async () => {
-  const kinds = ["empty", "empty_object", "no_records", "no_error_key", "block_record_null_error", "allow_but_exit_1", "garbage_exit_3", "not_executable_output", "bad_node_options"];
-  const enforce = await runAgent(HELPER_FAIL_AGENT, true, { CANARY });
+  const kinds = ["empty", "empty_object", "no_records", "no_error_key", "block_record_null_error", "allow_but_exit_1", "garbage_exit_3", "not_executable_output", "would_block_record"];
+  const enforce = await runAgent(`${FAKE_NODE}\n${HELPER_FAIL_AGENT}`, true, { CANARY });
   for (const kind of kinds) {
     assert.equal(enforce.out[kind].canary, false, `${kind}: the frame reached the child`);
     assert.equal(enforce.out[kind].failed, 2, `${kind}: helper_failed on write and on run(input=)`);
@@ -813,7 +822,7 @@ test("--mcp-enforce withholds a frame when the helper gives no usable answer; a 
   assert.match(enforce.log, /"action":"ALLOW"/);
 
   // Observe: no helper failure changes the child's bytes.
-  const observe = await runAgent(HELPER_FAIL_AGENT, false, { CANARY });
+  const observe = await runAgent(`${FAKE_NODE}\n${HELPER_FAIL_AGENT}`, false, { CANARY });
   for (const kind of [...kinds, "plain_with_bad_node", "real_block", "real_allow"]) {
     assert.equal(observe.out[kind].same, true, `observe ${kind}: bytes identical`);
   }
@@ -978,13 +987,8 @@ test("a line with JSONRPC or Method keys in another case goes to the helper, als
 // Finding 6. The slow node notes its own pid and the pid of a process it
 // starts, then waits 60 s. The wrapper gives the helper 5 s.
 const HANG_AGENT = String.raw`
-d = os.path.join(os.environ["HOME"], "slow-bin")
-os.makedirs(d, exist_ok=True)
-pids = os.path.join(d, "pids")
-with open(os.path.join(d, "node"), "w") as fh:
-    fh.write('#!/bin/sh\necho $$ >> "%s"\nsleep 60 &\necho $! >> "%s"\nwait\n' % (pids, pids))
-os.chmod(os.path.join(d, "node"), 0o755)
-PATH0 = os.environ["PATH"]
+pids = os.path.join(os.environ["HOME"], "pids")
+SLOW = 'echo $$ >> "%s"\nsleep 60 &\necho $! >> "%s"\nwait\n' % (pids, pids)
 def running(pid):
     try:
         with open("/proc/%d/stat" % pid) as fh:
@@ -1005,13 +1009,13 @@ def left():
             return len(alive)
         time.sleep(0.05)
 line = b"before\n" + FRAME + b"\nafter\n"
-os.environ["PATH"] = d + os.pathsep + PATH0
+node_impl(SLOW)
 t0 = time.time()
 o = subprocess.run(["cat"], input=line, capture_output=True, timeout=60).stdout.decode()
 out["slow"] = {"s": time.time() - t0, "same": o == line.decode(), "canary": os.environ["CANARY"] in o,
                "failed": '"finding":"helper_failed"' in o, "around": "before\n" in o and o.endswith("after\n"),
                "started": len(open(pids).read().split()), "left": left()}
-os.environ["PATH"] = PATH0
+node_impl(None)
 t0 = time.time()
 o = subprocess.run(["cat"], input=line, capture_output=True, timeout=60).stdout.decode()
 out["fast"] = {"s": time.time() - t0, "same": o == line.decode(), "canary": os.environ["CANARY"] in o,
@@ -1019,7 +1023,7 @@ out["fast"] = {"s": time.time() - t0, "same": o == line.decode(), "canary": os.e
 `;
 
 test("a helper that hangs is stopped after the timeout and no helper process is left running", { skip: !HAS_PY, timeout: 120000 }, async () => {
-  const enforce = await runAgent(HANG_AGENT, true, { CANARY });
+  const enforce = await runAgent(`${FAKE_NODE}\n${HANG_AGENT}`, true, { CANARY });
   assert.equal(enforce.out.slow.started, 2, "the slow node and its own child both started");
   assert.equal(enforce.out.slow.left, 0, "enforce: helper processes still running");
   assert.ok(enforce.out.slow.s >= 4.5 && enforce.out.slow.s < 15, `enforce waited ${enforce.out.slow.s}s`);
@@ -1031,11 +1035,319 @@ test("a helper that hangs is stopped after the timeout and no helper process is 
   assert.equal(enforce.out.fast.canary, false);
   assert.ok(enforce.out.fast.s < 4, `a working helper took ${enforce.out.fast.s}s`);
 
-  const observe = await runAgent(HANG_AGENT, false, { CANARY });
+  const observe = await runAgent(`${FAKE_NODE}\n${HANG_AGENT}`, false, { CANARY });
   assert.equal(observe.out.slow.started, 2);
   assert.equal(observe.out.slow.left, 0, "observe: helper processes still running");
   assert.ok(observe.out.slow.s >= 4.5 && observe.out.slow.s < 15, `observe waited ${observe.out.slow.s}s`);
   assert.equal(observe.out.slow.same, true, "observe: bytes identical with a hung helper");
   assert.equal(observe.out.fast.same, true);
   assert.match(observe.log, /tools\/call/, "the working helper's record is logged");
+});
+
+// Fixes after the independent review of f2b3269 (its findings 1, 2, 3, 4, 7).
+
+// Finding 1. A write to the child can be cut short: a pipe that would block,
+// or a signal during a write to a full pipe. Every byte the gate forwards
+// must still arrive once, in order.
+const SHORT_WRITE_AGENT = String.raw`
+import select, signal, hashlib
+LINES = b"".join(b"line %06d of plain text, no json here\n" % i for i in range(20000))
+MID = len(LINES) // 2
+DATA = LINES[:MID] + FRAME + b"\n" + LINES[MID:]
+SLOW_CAT = ["sh", "-c", "sleep 0.3; exec cat"]
+def verdict(o, counts, data=DATA):
+    return {"same": o == data, "plain_only": o == LINES, "canary": os.environ["CANARY"].encode() in o,
+            "len": len(o), "counted": sum(counts), "calls": len(counts)}
+def reader(p):
+    got = []
+    t = threading.Thread(target=lambda: got.append(p.stdout.read()), daemon=True); t.start()
+    return got, t
+def nonblocking(bufsize, close_blocking=True):
+    p = subprocess.Popen(SLOW_CAT, stdin=P, stdout=P, bufsize=bufsize)
+    os.set_blocking(p.stdin.fileno(), False)
+    got, t = reader(p)
+    sent = 0; counts = []
+    while sent < len(DATA):
+        select.select([], [p.stdin], [], 5)
+        try:
+            n = p.stdin.write(DATA[sent:sent + 100000])
+        except BlockingIOError as exc:
+            n = exc.characters_written
+        n = n or 0
+        counts.append(n); sent += n
+    if close_blocking:
+        os.set_blocking(p.stdin.fileno(), True)
+    while True:
+        try:
+            p.stdin.close(); break
+        except BlockingIOError:
+            select.select([], [p.stdin], [], 5)
+    t.join(60); p.wait()
+    return verdict(got[0], counts)
+out["nonblocking_unbuffered"] = nonblocking(0)
+out["nonblocking_buffered"] = nonblocking(-1)
+out["nonblocking_close_while_nonblocking"] = nonblocking(0, close_blocking=False)
+# A signal every 50 ms during one large write to a pipe nobody reads yet.
+signal.signal(signal.SIGALRM, lambda *a: None)
+big = (b"plain text line without json " * 40000)[:1000000] + b"\n" + FRAME + b"\nlast\n"
+p = subprocess.Popen(["sh", "-c", "sleep 0.5; exec cat"], stdin=P, stdout=P, bufsize=0)
+got, t = reader(p)
+signal.setitimer(signal.ITIMER_REAL, 0.05, 0.05)
+sent = 0; counts = []; view = memoryview(big)
+while sent < len(big):
+    n = p.stdin.write(view[sent:]) or 0
+    counts.append(n); sent += n
+signal.setitimer(signal.ITIMER_REAL, 0)
+p.stdin.close(); t.join(60); p.wait()
+o = got[0]
+out["signal_during_write"] = {"same": o == big, "plain_only": o == big.replace(FRAME + b"\n", b""),
+                              "canary": os.environ["CANARY"].encode() in o, "counted": sum(counts), "len": len(big)}
+# Blocking pipes: the count is the caller's own length, as before.
+def counts_blocking(**kw):
+    p = subprocess.Popen(["cat"], stdin=P, stdout=P, **kw)
+    text = "encoding" in kw
+    parts = [b"plain\n", b'{"a":1}\n', b'{"held', b'":2}\n', b"x" * 70000 + b"\n"]
+    r = [p.stdin.write(x.decode() if text else x) for x in parts]
+    p.stdin.close(); o = p.stdout.read(); p.wait()
+    return {"counts": r, "same": (o.encode() if text else o) == b"".join(parts)}
+out["blocking_counts"] = {"raw": counts_blocking(bufsize=0), "buffered": counts_blocking(), "text": counts_blocking(encoding="utf-8")}
+# Text mode: a string the pipe's encoding cannot take raises before any of it is sent.
+p = subprocess.Popen(["cat"], stdin=P, stdout=P, text=True, encoding="latin-1")
+try:
+    p.stdin.write('ok\n{"a":1}\n€\n'); err = "no error"
+except UnicodeEncodeError:
+    err = "UnicodeEncodeError"
+p.stdin.write("retry\n"); p.stdin.close()
+out["encoding_error"] = [err, p.stdout.read()]; p.wait()
+`;
+
+test("no forwarded byte is lost or sent twice when a write to the child is cut short", { skip: !HAS_PY, timeout: 180000 }, async () => {
+  const total = 20000 * 40;
+  const enforce = await runAgent(SHORT_WRITE_AGENT, true, { CANARY });
+  for (const key of ["nonblocking_unbuffered", "nonblocking_buffered", "nonblocking_close_while_nonblocking"]) {
+    assert.equal(enforce.out[key].plain_only, true, `enforce ${key}: the child got ${enforce.out[key].len} bytes, wanted ${total}`);
+    assert.equal(enforce.out[key].counted, total + FRAME.length + 1, `enforce ${key}: the caller's counts add up to its data`);
+  }
+  assert.equal(enforce.out.signal_during_write.plain_only, true, "enforce: bytes lost around a signal");
+  assert.equal(enforce.out.signal_during_write.counted, enforce.out.signal_during_write.len);
+  // Negative case: the frame in the middle of the same streams is still
+  // withheld, and nothing is forwarded from a string that cannot be encoded.
+  for (const key of ["nonblocking_unbuffered", "nonblocking_buffered", "nonblocking_close_while_nonblocking", "signal_during_write"]) {
+    assert.equal(enforce.out[key].canary, false, `enforce ${key}: the frame reached the child`);
+  }
+  assert.deepEqual(enforce.out.encoding_error, ["UnicodeEncodeError", "retry\n"]);
+
+  // Observe: the same streams are byte-identical and the counts are the real write's.
+  const observe = await runAgent(SHORT_WRITE_AGENT, false, { CANARY });
+  for (const key of ["nonblocking_unbuffered", "nonblocking_buffered", "nonblocking_close_while_nonblocking", "signal_during_write"]) {
+    assert.equal(observe.out[key].same, true, `observe ${key}: bytes identical`);
+  }
+  assert.deepEqual(observe.out.encoding_error, ["UnicodeEncodeError", "retry\n"]);
+  // On a pipe that blocks, each write returns the caller's own length in both modes.
+  for (const mode of [enforce, observe]) {
+    for (const kind of ["raw", "buffered", "text"]) {
+      assert.deepEqual(mode.out.blocking_counts[kind].counts, [6, 8, 6, 5, 70001], kind);
+      assert.equal(mode.out.blocking_counts[kind].same, true, kind);
+    }
+  }
+});
+
+// Finding 2. The mode, the policy file and the node path are read once, at start.
+const ENV_AGENT = String.raw`
+PING = b'{"jsonrpc":"2.0","id":3,"method":"ping","params":{"x":"' + os.environ["CANARY"].encode() + b'"}}\n'
+def reached(data=None):
+    data = data or (b"before\n" + FRAME + b"\nafter\n")
+    o = piped(data)
+    r = subprocess.run(["cat"], input=data, capture_output=True).stdout.decode()
+    return [CAN in o, CAN in r]
+CAN = os.environ["CANARY"]
+saved = dict(os.environ)
+def restore():
+    os.environ.clear(); os.environ.update(saved)
+out["baseline"] = reached()
+os.environ["VANTIO_MCP_MODE"] = "observe"; out["mode_set_to_observe"] = reached(); restore()
+del os.environ["VANTIO_MCP_MODE"]; out["mode_deleted"] = reached(); restore()
+os.environ["VANTIO_MCP_MODE"] = "enforce"; out["mode_set_to_enforce"] = reached(); restore()
+path = os.environ["PATH"]; os.environ.clear(); os.environ["PATH"] = path; out["environ_cleared"] = reached(); restore()
+# A policy that allows everything, named only after the start.
+late = os.path.join(os.environ["HOME"], "late-policy.json")
+with open(late, "w") as fh:
+    json.dump({"servers": {"cat": {"default": "allow"}}}, fh)
+out["ping_before_policy"] = reached(PING)
+os.environ["VANTIO_MCP_POLICY"] = late; out["policy_set_late"] = reached(PING); restore()
+# A node that allows everything, put first on PATH only after the start.
+d = os.path.join(os.environ["HOME"], "late-bin"); os.makedirs(d)
+with open(os.path.join(d, "node"), "w") as fh:
+    fh.write('#!/bin/sh\ncat >/dev/null\nprintf \'{"records":[{"schema":"vantio.mcp_observation.v1","decision":{"action":"ALLOW"}}],"error":null}\'\n')
+os.chmod(os.path.join(d, "node"), 0o755)
+os.environ["PATH"] = d + os.pathsep + os.environ["PATH"]; out["node_put_on_path_late"] = reached(); restore()
+os.environ["NODE_OPTIONS"] = "--no-such-flag-van393"
+o = piped(b"before\n" + FRAME + b"\nafter\n")
+out["node_options_set_late"] = {"canary": CAN in o, "helper_failed": "helper_failed" in o}; restore()
+# The policy file named at the start is still read for each line.
+with open(os.environ["VANTIO_MCP_POLICY"], "w") as fh:
+    json.dump({"servers": {"cat": {"default": "allow"}}}, fh)
+out["ping_with_start_policy"] = reached(PING)
+`;
+
+const MODE_AGENT = String.raw`
+import json, os, subprocess
+line = os.environ["FRAME"].encode() + b"\n"
+o = subprocess.run(["cat"], input=line, capture_output=True).stdout
+print("RESULT " + json.dumps({"reached": os.environ["CANARY"].encode() in o, "same": o == line}))
+`;
+
+test("the mode, the policy file and node are fixed when Python starts; a later change to os.environ does not turn enforce off", { skip: !HAS_PY, timeout: 180000 }, async () => {
+  const enforce = await runAgent(ENV_AGENT, true, { CANARY });
+  assert.deepEqual(enforce.out.baseline, [false, false]);
+  for (const key of ["mode_set_to_observe", "mode_deleted", "environ_cleared", "policy_set_late", "node_put_on_path_late"]) {
+    assert.deepEqual(enforce.out[key], [false, false], `enforce ${key}: the frame reached the child`);
+  }
+  assert.deepEqual(enforce.out.ping_before_policy, [false, false]);
+  assert.deepEqual(enforce.out.node_options_set_late, { canary: false, helper_failed: false }, "the helper runs with the environment from the start");
+  // Negative cases: the policy file named at the start still decides (a ping
+  // passes once that file allows it), and observe stays observe.
+  assert.deepEqual(enforce.out.ping_with_start_policy, [true, true]);
+  const observe = await runAgent(ENV_AGENT, false, { CANARY });
+  for (const key of ["baseline", "mode_set_to_enforce", "mode_set_to_observe", "mode_deleted", "environ_cleared"]) {
+    assert.deepEqual(observe.out[key], [true, true], `observe ${key}: the child did not get the frame`);
+  }
+
+  // The mode value itself, without the launcher. Anything that is not
+  // `observe`, empty or missing means enforce, and the banner says so.
+  const home = mkdtempSync(join(tmpdir(), "van393-mode-"));
+  const agent = join(home, "agent.py");
+  writeFileSync(agent, MODE_AGENT);
+  const direct = (mode) => {
+    const env = { PATH: process.env.PATH, HOME: home, FRAME, CANARY, VANTIO_MCP_AWARENESS: "on", PYTHONPATH: join(__dirname, "..", "bin", "python-wrap") };
+    if (mode !== null) env.VANTIO_MCP_MODE = mode;
+    const r = spawnSync("python3", [agent], { env, encoding: "utf8", timeout: 60000 });
+    return { ...result(r.stdout), banner: (r.stderr.match(/mcp awareness mode=(\w+)/) || [])[1] };
+  };
+  try {
+    for (const mode of ["enforce", "Enforce", "ENFORCE ", "strict"]) {
+      assert.deepEqual(direct(mode), { reached: false, same: false, banner: "enforce" }, `VANTIO_MCP_MODE=${JSON.stringify(mode)}`);
+    }
+    for (const mode of [null, "", "observe", "Observe"]) {
+      assert.deepEqual(direct(mode), { reached: true, same: true, banner: "observe" }, `VANTIO_MCP_MODE=${JSON.stringify(mode)}`);
+    }
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// Finding 3. A response has no method. It is an object with an id and a
+// result or an error.
+const RESPONSE_AGENT = String.raw`
+count = fake_node(0)
+c = os.environ["CANARY"].encode()
+shapes = {
+    "result": b'{"id":7,"result":{"content":[{"type":"text","text":"' + c + b'"}]}}',
+    "error": b'{"id":7,"error":{"code":1,"message":"' + c + b'"}}',
+    "other_case": b'{"ID":7,"Result":{"x":"' + c + b'"}}',
+    "nested_batch": b'[[{"id":7,"result":"' + c + b'"}]]',
+}
+for name, line in shapes.items():
+    out[name] = probe(line + b"\nafter\n")
+    r = subprocess.run(["cat"], input=line + b"\nafter\n", capture_output=True).stdout.decode()
+    out[name]["run_canary"] = os.environ["CANARY"] in r
+    out[name]["run_blocked"] = "vantio_mcp_policy_block" in r
+out["starts_shapes"] = starts(count)
+n0 = starts(count)
+other = (b'{"id":7,"value":{"result":1}}\n{"result":1,"error":2}\n[{"id":1},{"result":2}]\n{"identity":1,"results":[]}\n'
+         b'{"a":NaN,"b":[Infinity,-Infinity]}\n[1' + b"0" * 5000 + b',1.5e999]\n')
+out["other_same"] = piped(other) == other.decode()
+out["other_run_same"] = subprocess.run(["cat"], input=other, capture_output=True).stdout == other
+out["starts_other"] = starts(count) - n0
+`;
+
+test("an object with an id and a result or an error goes to the helper, also inside a batch; --mcp-enforce withholds it", { skip: !HAS_PY, timeout: 120000 }, async () => {
+  const names = ["result", "error", "other_case", "nested_batch"];
+  const enforce = await runAgent(`${FAKE_NODE}\n${RESPONSE_AGENT}`, true, { CANARY });
+  for (const name of names) {
+    assert.equal(enforce.out[name].canary || enforce.out[name].run_canary, false, `${name} reached the child`);
+    assert.equal(enforce.out[name].blocked && enforce.out[name].run_blocked, true, name);
+    assert.equal(enforce.out[name].after, true, `${name}: next line`);
+  }
+  assert.equal(enforce.out.starts_shapes, 8, "one node start per checked line");
+  assert.equal(enforce.log.includes(CANARY), false);
+  // Negative case: an id without a result, a result without an id, the two in
+  // different objects, look-alike keys, NaN, Infinity and a 5000-digit
+  // integer all pass, and node is not started.
+  assert.equal(enforce.out.other_same, true);
+  assert.equal(enforce.out.other_run_same, true);
+  assert.equal(enforce.out.starts_other, 0);
+
+  const observe = await runAgent(`${FAKE_NODE}\n${RESPONSE_AGENT}`, false, { CANARY });
+  for (const name of names) assert.equal(observe.out[name].same, true, `observe ${name}: bytes identical`);
+  assert.equal(observe.out.starts_shapes, 8, "observe sends the same lines to the helper");
+  assert.equal(observe.out.other_same, true);
+  assert.equal(observe.out.other_run_same, true);
+  assert.equal(observe.out.starts_other, 0);
+  assert.equal(observe.log.includes(CANARY), false);
+});
+
+// Finding 7. Two threads write to one child's stdin.
+const THREADS_AGENT = String.raw`
+ENFORCE = os.environ["VANTIO_MCP_MODE"] == "enforce"
+# 1. Thread A is inside a large plain line (the child does not read yet).
+#    Thread B then writes a frame. It must be checked as a line of its own.
+p = subprocess.Popen(["sh", "-c", "sleep 0.6; exec cat"], stdin=P, stdout=P, bufsize=0)
+got = []
+r = threading.Thread(target=lambda: got.append(p.stdout.read()), daemon=True); r.start()
+big = b"A" * 300000 + b"\n"
+a = threading.Thread(target=lambda: p.stdin.write(big)); a.start()
+time.sleep(0.2)
+b = threading.Thread(target=lambda: p.stdin.write(FRAME + b"\n")); b.start()
+a.join(30); b.join(30)
+p.stdin.close(); r.join(30); p.wait()
+o = got[0]
+out["frame_during_write"] = {"canary": os.environ["CANARY"].encode() in o, "big_whole": big in o, "len": len(o),
+                             "same": o == big + FRAME + b"\n"}
+# 2. A sends frames, B sends plain lines, each line in one write.
+def two(bufsize):
+    p = subprocess.Popen(["cat"], stdin=P, stdout=P, bufsize=bufsize)
+    got = []
+    r = threading.Thread(target=lambda: got.append(p.stdout.read()), daemon=True); r.start()
+    lines_b = [b"B %05d %s\n" % (i, b"b" * (i % 90)) for i in range(3000)]
+    lines_a = [b'{"note":%d,"pad":"%s"}\n' % (i, b"a" * (i % 70)) for i in range(3000)]
+    frames = 12
+    def writer_a():
+        for i, line in enumerate(lines_a):
+            p.stdin.write(line)
+            if i % 250 == 0 and i // 250 < frames:
+                p.stdin.write(FRAME + b"\n")
+    def writer_b():
+        for line in lines_b:
+            p.stdin.write(line)
+    ta = threading.Thread(target=writer_a); tb = threading.Thread(target=writer_b)
+    ta.start(); tb.start(); ta.join(120); tb.join(120)
+    p.stdin.close(); r.join(60); p.wait()
+    seen = got[0].split(b"\n")
+    frame_lines = [x for x in seen if x == FRAME]
+    rest = [x + b"\n" for x in seen if x and x != FRAME]
+    return {"canary": os.environ["CANARY"].encode() in got[0], "frames_seen": len(frame_lines),
+            "b_in_order": [x for x in rest if x.startswith(b"B ")] == lines_b,
+            "a_in_order": [x for x in rest if x.startswith(b"{")] == lines_a,
+            "nothing_else": len(rest) == len(lines_a) + len(lines_b)}
+out["two_writers_unbuffered"] = two(0)
+out["two_writers_buffered"] = two(-1)
+`;
+
+test("two threads writing to one child: a frame is checked on its own and every line arrives whole", { skip: !HAS_PY, timeout: 180000 }, async () => {
+  const enforce = await runAgent(THREADS_AGENT, true, { CANARY });
+  assert.equal(enforce.out.frame_during_write.canary, false, "a frame written by a second thread during a large write reached the child");
+  assert.equal(enforce.out.frame_during_write.big_whole, true);
+  for (const key of ["two_writers_unbuffered", "two_writers_buffered"]) {
+    assert.equal(enforce.out[key].canary, false, `enforce ${key}: a frame reached the child`);
+    assert.equal(enforce.out[key].frames_seen, 0, key);
+    assert.equal(enforce.out[key].b_in_order && enforce.out[key].a_in_order && enforce.out[key].nothing_else, true, `enforce ${key}: ${JSON.stringify(enforce.out[key])}`);
+  }
+  // Negative case, observe: nothing is withheld; each write arrives whole and in its thread's order.
+  const observe = await runAgent(THREADS_AGENT, false, { CANARY });
+  assert.equal(observe.out.frame_during_write.same, true, "observe: the large line, then the frame, unchanged");
+  for (const key of ["two_writers_unbuffered", "two_writers_buffered"]) {
+    assert.equal(observe.out[key].frames_seen, 12, `observe ${key}: every frame reaches the child`);
+    assert.equal(observe.out[key].b_in_order && observe.out[key].a_in_order && observe.out[key].nothing_else, true, `observe ${key}: ${JSON.stringify(observe.out[key])}`);
+  }
 });
