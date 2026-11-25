@@ -2,8 +2,12 @@
 
 The Node library evaluates a copy of each complete line. This module does
 not listen and does not replace the child process. Observe never changes
-what the child gets, and runs the Node helper for a line only after the
-caller's bytes have been handed over. Enforce withholds a blocked line.
+what the child gets. It runs the Node helper for a line after the caller's
+bytes have been handed over, with one exception: when 64 lines or 1 MiB
+are waiting on a buffered pipe, the helper runs at once, and the child may
+not have received those bytes yet. Enforce forwards a checked line only
+when the helper exits 0 and its answer says allow; anything else is
+withheld. A lone CR ends a line, as a newline does.
 """
 
 from __future__ import annotations
@@ -14,6 +18,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -22,6 +27,8 @@ _HELPER = Path(__file__).resolve().parent.parent / "mcp-awareness-frame.js"
 _LOG_MAX = 1024 * 1024
 # Same bound as the Node library (bin/mcp-awareness/bounds.js MAX_FRAME).
 _MAX_FRAME = 256 * 1024
+# Seconds the Node helper gets for one line. After that it is stopped.
+_ASK_TIMEOUT = 5
 
 
 def install() -> None:
@@ -92,6 +99,11 @@ def install() -> None:
 # Blanks that may come before a frame on its line. The Node library trims the
 # same set (String.prototype.trimStart), so none of them can hide a frame.
 _ASCII_BLANKS = re.compile(rb"[ \t\n\r\x0b\x0c]+")
+# A line ends at a newline or at a CR. A reader with universal newlines (the
+# default for Python text streams) splits on a lone CR too, so a frame after
+# a CR is a line of its own for such a child.
+_EOL = re.compile(rb"[\r\n]")
+_RPC_KEYS = frozenset(("jsonrpc", "method"))
 _WIDE_BLANKS = frozenset(
     ch.encode("utf-8")
     for ch in "\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a"
@@ -102,21 +114,23 @@ _WIDE_BLANKS = frozenset(
 def _is_rpc(value) -> bool:
     """An object with a `jsonrpc` or a `method` key, or an array that holds
     one at any depth. A server that does not check the `jsonrpc` key would
-    still act on a `method`."""
+    still act on a `method`. Key case is ignored (`Method`, `JSONRPC`): some
+    JSON decoders match field names that way."""
     stack = [value]
     while stack:
         item = stack.pop()
         if isinstance(item, dict):
-            if "jsonrpc" in item or "method" in item:
-                return True
+            for key in item:
+                if key.casefold() in _RPC_KEYS:
+                    return True
         elif isinstance(item, list):
             stack.extend(item)
     return False
 
 
 def _classify(line: bytes) -> str:
-    """rpc: an object with a `jsonrpc` or `method` key, or an array (batch)
-    that holds one. plain: any other JSON value. bad: starts like JSON but
+    """rpc: an object with a `jsonrpc` or `method` key (any case), or an
+    array (batch) that holds one. plain: any other JSON value. bad: starts like JSON but
     does not parse (this includes a line that is not valid UTF-8)."""
     try:
         value = json.loads(line.decode("utf-8"))
@@ -137,20 +151,29 @@ class _Gate:
     Those lines are queued and go to the Node helper (for the log) after the
     bytes have been handed over: after a write to an unbuffered or
     line-buffered pipe, after flush(), after close() and after communicate().
-    The queue is bounded; when it is full the helper runs at once.
+    The queue is bounded at 64 lines or 1 MiB. When it is full the helper
+    runs at once; on a buffered pipe the child may not have received those
+    bytes yet. A helper that fails or hangs never changes the child's bytes.
+
+    A line ends at a newline or at a lone CR, in both modes. Each part
+    between CRs is handled as a line of its own, and the CR stays where it
+    was in what the child gets.
 
     Enforce: blanks at the start of a line are forwarded as they arrive. A
     line whose first non-blank byte is `{` or `[` is held from that byte to
-    its newline and parsed as JSON here. So is a line where up to 4 bytes of
-    broken UTF-8 come right before the `{` or `[`; those bytes are held with
-    it. JSON that is not JSON-RPC is forwarded without starting node. An
-    object with a `jsonrpc` or `method` key, a batch that holds one, or a
-    line that does not parse goes to the Node helper, which alone decides; a
-    blocked line is withheld. Any other line is forwarded as it arrives.
+    its line end and parsed as JSON here. So is a line where up to 4 bytes
+    of broken UTF-8 come right before the `{` or `[`; those bytes are held
+    with it. JSON that is not JSON-RPC is forwarded without starting node.
+    An object with a `jsonrpc` or `method` key (any case), a batch that
+    holds one, or a line that does not parse goes to the Node helper. The
+    line is forwarded only when the helper exits 0 and its answer says
+    allow (see _ask). A blocked line is withheld, and so is a line whose
+    check did not run or gave no usable answer (`helper_failed`). Any other
+    line is forwarded as it arrives.
 
-    The held part is bounded at _MAX_FRAME, newline included, as in the Node
-    library. Past the bound one oversize gap is logged; enforce withholds the
-    line up to its newline and answers with the fixed error.
+    The held part is bounded at _MAX_FRAME, line end included, as in the
+    Node library. Past the bound one oversize gap is logged; enforce
+    withholds the line up to its line end and answers with the fixed error.
     """
 
     def __init__(self, proc, server_id: str, orig_write, original, stdin) -> None:
@@ -166,6 +189,9 @@ class _Gate:
         # At most 4 bytes at the start of a line that are not ASCII and not
         # yet a whole character: part of a wide blank, or broken UTF-8.
         self.pre = bytearray()
+        # Enforce: a withheld line ended at a CR. If a newline comes next it
+        # is the second half of that line's CRLF and is withheld with it.
+        self.skip_lf = False
         self.todo = []  # observe: lines waiting for the helper
         self.todo_bytes = 0
         self.closing = False
@@ -189,10 +215,16 @@ class _Gate:
         i = 0
         n = len(data)
         while i < n:
+            if self.skip_lf:
+                self.skip_lf = False
+                if data[i : i + 1] == b"\n":
+                    i += 1
+                    continue
             state = self.state
             if state == "pass" or state == "drop":
-                # drop: enforce, oversize line; nothing reaches the child until its newline.
-                j = data.find(b"\n", i)
+                # drop: enforce, oversize line; nothing reaches the child until its line end.
+                m = _EOL.search(data, i)
+                j = -1 if m is None else m.start()
                 end = n if j < 0 else j + 1
                 if state == "pass":
                     if self.pre:
@@ -204,22 +236,25 @@ class _Gate:
                 i = end
                 if j >= 0:
                     self.state = "start"
+                    self.skip_lf = state == "drop" and data[j : j + 1] == b"\r"
             elif state == "json":
                 room = _MAX_FRAME - len(self.held)
-                j = data.find(b"\n", i, i + room)
+                m = _EOL.search(data, i, i + room)
+                j = -1 if m is None else m.start()
                 if j >= 0:
                     self.held.extend(data[i : j + 1])
                     i = j + 1
                     line = bytes(self.held)
                     self.held.clear()
                     self.state = "start"
-                    self._line(line, out)
+                    forwarded = self._line(line, out)
+                    self.skip_lf = self.enforce and not forwarded and line.endswith(b"\r")
                     continue
                 take = min(room, n - i)
                 self.held.extend(data[i : i + take])
                 i += take
                 if len(self.held) >= _MAX_FRAME:
-                    # _MAX_FRAME bytes and no newline among them. The newline
+                    # _MAX_FRAME bytes and no line end among them. The line end
                     # is not consumed here, so the next line is not touched.
                     self._oversize()
             elif self.pre:  # start, after bytes that are not yet a whole character
@@ -273,29 +308,35 @@ class _Gate:
         self.pre.clear()
         self.held.clear()
         self.state = "start"
+        self.skip_lf = False
         if pre:
             out(pre)
         if held and state == "json":
             self._line(held, out)
 
-    def _line(self, line: bytes, out) -> None:
+    def _line(self, line: bytes, out) -> bool:
+        """Handle one held line. True when the line went to `out`."""
         kind = _classify(line)
         if kind == "plain":
             out(line)
-            return
+            return True
         if not self.enforce:
             # Observe: the child already has the line; the check only logs.
             if kind == "rpc" or b'"jsonrpc"' in line:
                 self._observe(line)
-            return
+            return True
         # Enforce: the helper decides. A line that does not parse goes to it too.
-        verdict = _ask(line, self.server_id, self.original)
-        _log_verdict(verdict)
-        error = verdict.get("error") if isinstance(verdict, dict) else None
-        if error:
-            self.blocked(error if isinstance(error, str) else str(error))
-            return
-        out(line)
+        # Fail closed: the line goes on only when the answer says allow.
+        try:
+            answer = _ask(line, self.server_id, self.original)
+        except Exception:
+            answer = _failed()
+        _log(answer["records"])
+        if answer["allow"]:
+            out(line)
+            return True
+        self.blocked(answer["error"] or _helper_error())
+        return False
 
     def _oversize(self) -> None:
         """The held line reached _MAX_FRAME before its newline."""
@@ -306,15 +347,13 @@ class _Gate:
             self._observe(head)
             return
         self.state = "drop"
-        error = None
         try:
-            verdict = _ask(head, self.server_id, self.original)
-            _log_verdict(verdict)
-            error = verdict.get("error") if isinstance(verdict, dict) else None
+            answer = _ask(head, self.server_id, self.original)
+            _log(answer["records"])
         except Exception:
-            error = None
+            answer = _failed()
         # Fail closed: an oversize line is withheld whatever the helper said.
-        self.blocked(error if isinstance(error, str) and error else _fixed_error())
+        self.blocked(answer["error"] or _fixed_error())
 
     def _observe(self, line: bytes) -> None:
         """Observe: queue a line for the helper. It only logs."""
@@ -328,7 +367,7 @@ class _Gate:
         todo, self.todo, self.todo_bytes = self.todo, [], 0
         for line in todo:
             try:
-                _log_verdict(_ask(line, self.server_id, self.original))
+                _log(_ask(line, self.server_id, self.original)["records"])
             except Exception:
                 pass
 
@@ -381,12 +420,6 @@ class _Gate:
         result = bytes(allowed)
         as_text = isinstance(data, str) or (data is None and self.text)
         return (result.decode("utf-8", "surrogatepass") if as_text else result), bytes(errors)
-
-
-def _log_verdict(verdict) -> None:
-    records = verdict.get("records") if isinstance(verdict, dict) else []
-    if isinstance(records, list):
-        _log(records)
 
 
 def _attach(proc: subprocess.Popen, args: tuple, original) -> None:
@@ -505,30 +538,98 @@ def _as_stream(text: str, stream):
     return text.encode("utf-8")
 
 
+_ALLOW_ACTIONS = frozenset(("ALLOW", "LOG", "WOULD_BLOCK"))
+
+
+def _failed() -> dict:
+    """The check did not run or gave no usable answer. Enforce withholds."""
+    return {"records": [], "error": _helper_error(), "allow": False}
+
+
+def _stop(proc) -> None:
+    """Kill the helper (and anything it started) and reap it. Never raises."""
+    try:
+        if os.name == "posix":
+            os.killpg(proc.pid, signal.SIGKILL)  # its own group, see _ask
+        else:
+            proc.kill()
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+    for stream in (proc.stdin, proc.stdout):
+        try:
+            if stream is not None:
+                stream.close()
+        except Exception:
+            pass
+    try:
+        proc.wait(timeout=5)
+    except Exception:
+        pass
+
+
 def _ask(line: bytes, server_id: str, original) -> dict:
+    """Run the Node helper for one line. Never raises.
+
+    Returns {"records": list, "error": str or None, "allow": bool}.
+    `allow` is true only for the answer mcp-awareness-frame.js gives for a
+    line it lets through: exit code 0, a JSON object whose `error` is null
+    and whose `records` is a list with at least one observation record,
+    each with an ALLOW, LOG or WOULD_BLOCK decision. A helper block (exit
+    code 0 and an `error` string) keeps the helper's error. Everything else
+    is `helper_failed`: no node, a node that does not start, a non-zero
+    exit, a timeout, empty output, `{}`, or output that is not that shape.
+    The caller logs the records; only enforce reads `allow` and `error`.
+    """
     node = shutil.which("node")
-    enforce = os.environ.get("VANTIO_MCP_MODE") == "enforce"
     if node is None or not _HELPER.is_file():
-        return {"records": [], "error": _fixed_error() if enforce else None}
-    env = dict(os.environ)
+        return _failed()
+    proc = None
     try:
         proc = original(
             [node, str(_HELPER), server_id],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            env=env,
+            env=dict(os.environ),
+            # Its own process group, so a hung helper can be stopped whole.
+            start_new_session=os.name == "posix",
         )
-        out, _err = proc.communicate(line, timeout=5)
-    except Exception:
-        return {"records": [], "error": _fixed_error() if enforce else None}
+        out, _err = proc.communicate(line, timeout=_ASK_TIMEOUT)
+    except BaseException as exc:
+        # Timeout, a broken pipe, an interrupt: no helper is left running.
+        if proc is not None:
+            _stop(proc)
+        if not isinstance(exc, Exception):
+            raise
+        return _failed()
+    if proc.returncode != 0:
+        return _failed()
     try:
-        parsed = json.loads(out.decode("utf-8") if out else "{}")
-    except (UnicodeError, json.JSONDecodeError):
-        return {"records": [], "error": _fixed_error() if enforce else None}
-    if not isinstance(parsed, dict):
-        return {"records": [], "error": _fixed_error() if enforce else None}
-    return parsed
+        parsed = json.loads(out.decode("utf-8"))
+    except Exception:
+        return _failed()
+    if not isinstance(parsed, dict) or "error" not in parsed:
+        return _failed()
+    records = parsed.get("records")
+    error = parsed["error"]
+    if not isinstance(records, list) or not all(isinstance(r, dict) for r in records):
+        return _failed()
+    if isinstance(error, str) and error:
+        return {"records": records, "error": error, "allow": False}
+    # Not an allow answer. The records are still returned for the log:
+    # in observe the helper reports a GAP or BLOCK record with a null error.
+    refused = {"records": records, "error": _helper_error(), "allow": False}
+    if error is not None or not records:
+        return refused
+    for record in records:
+        decision = record.get("decision")
+        action = decision.get("action") if isinstance(decision, dict) else None
+        if record.get("schema") != "vantio.mcp_observation.v1" or action not in _ALLOW_ACTIONS:
+            return refused
+    return {"records": records, "error": None, "allow": True}
 
 
 def _log(records: list) -> None:
@@ -560,6 +661,14 @@ def _server_id(command: str) -> str:
     if base and all(ch.isalnum() or ch in "_.:-" for ch in base) and len(base) <= 64:
         return base
     return "child"
+
+
+def _helper_error() -> str:
+    """Enforce: the check for a line did not run or gave no usable answer."""
+    return (
+        '{"jsonrpc":"2.0","id":null,"error":{"code":-32001,'
+        '"message":"vantio_mcp_policy_block","data":{"finding":"helper_failed"}}}\n'
+    )
 
 
 def _fixed_error() -> str:
