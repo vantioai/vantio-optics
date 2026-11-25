@@ -1608,6 +1608,73 @@ globalThis.fetch = function vantioFetch(input, init) {
     return Buffer.byteLength(rhs);
   }
 
+  // curl reads an argument with no scheme as host[:port][/path] and uses http
+  // (VAN-394). A name that starts with ftp., dict., ldap., imap., smtp. or
+  // pop3. is read by curl as that protocol, so it is not taken here.
+  const SCHEMELESS_URL_RE = /^(localhost|(?:\d{1,3}\.){3}\d{1,3}|\[[0-9a-f:.]+\]|(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]*[a-z0-9])(?::\d{1,5})?(?:[/?#]\S*)?$/i;
+  const SCHEMELESS_OTHER_PROTOCOL_RE = /^(?:ftp|dict|ldap|imap|smtp|pop3)\./i;
+
+  function isSchemelessUrl(token) {
+    const t = String(token || "");
+    return SCHEMELESS_URL_RE.test(t) && !SCHEMELESS_OTHER_PROTOCOL_RE.test(t);
+  }
+
+  // Returns the URL with a scheme, or null when the token is not a URL.
+  function httpUrlFromToken(token, defaultScheme) {
+    const t = String(token || "");
+    if (/^https?:\/\//i.test(t)) return t;
+    if (defaultScheme && isSchemelessUrl(t)) return `${defaultScheme}://${t}`;
+    return null;
+  }
+
+  // curl options whose value is the next argument. A value is never a URL, so
+  // `-o api.example.test` is not read as a call. Options the parser handles
+  // itself (-d, -F, -T, -K, --url and their long forms) are listed too.
+  const CURL_SHORT_WITH_VALUE = "AbcCdDeEFHKmoPQrtTuUwxXyYz";
+  const CURL_LONG_WITH_VALUE = new Set([
+    "abstract-unix-socket", "alt-svc", "aws-sigv4", "cacert", "capath", "cert", "cert-type", "ciphers",
+    "config", "connect-timeout", "connect-to", "continue-at", "cookie", "cookie-jar", "create-file-mode",
+    "crlfile", "curves", "data", "data-ascii", "data-binary", "data-raw", "data-urlencode", "delegation",
+    "dns-interface", "dns-ipv4-addr", "dns-ipv6-addr", "dns-servers", "doh-url", "dump-header", "ech",
+    "egd-file", "engine", "etag-compare", "etag-save", "expect100-timeout", "form", "form-string",
+    "ftp-account", "ftp-alternative-to-user", "ftp-method", "ftp-port", "ftp-ssl-ccc-mode",
+    "happy-eyeballs-timeout-ms", "haproxy-clientip", "header", "hostpubmd5", "hostpubsha256", "hsts",
+    "interface", "ip-tos", "ipfs-gateway", "json", "keepalive-cnt", "keepalive-time", "key", "key-type",
+    "krb", "libcurl", "limit-rate", "local-port", "login-options", "mail-auth", "mail-from", "mail-rcpt",
+    "max-filesize", "max-redirs", "max-time", "netrc-file", "noproxy", "oauth2-bearer", "output",
+    "output-dir", "parallel-max", "pass", "pinnedpubkey", "preproxy", "proto", "proto-default",
+    "proto-redir", "proxy", "proxy-cacert", "proxy-capath", "proxy-cert", "proxy-cert-type",
+    "proxy-ciphers", "proxy-crlfile", "proxy-header", "proxy-key", "proxy-key-type", "proxy-pass",
+    "proxy-pinnedpubkey", "proxy-service-name", "proxy-tls13-ciphers", "proxy-tlsauthtype",
+    "proxy-tlspassword", "proxy-tlsuser", "proxy-user", "proxy1.0", "pubkey", "quote", "random-file",
+    "range", "rate", "referer", "request", "request-target", "resolve", "retry", "retry-delay",
+    "retry-max-time", "sasl-authzid", "service-name", "socks4", "socks4a", "socks5",
+    "socks5-gssapi-service", "socks5-hostname", "speed-limit", "speed-time", "stderr", "telnet-option",
+    "tftp-blksize", "time-cond", "tls-max", "tls13-ciphers", "tlsauthtype", "tlspassword", "tlsuser",
+    "trace", "trace-ascii", "trace-config", "unix-socket", "upload-file", "url", "url-query", "user",
+    "user-agent", "variable", "vlan-priority", "write-out",
+  ]);
+
+  function curlOptionTakesNextArg(a) {
+    if (a.startsWith("--")) {
+      if (a.includes("=")) return false;
+      const name = a.slice(2);
+      return CURL_LONG_WITH_VALUE.has(name) || name.startsWith("expand-");
+    }
+    // A short cluster such as -sSo: the first letter that takes a value ends
+    // it. The value is the rest of the argument, or the next argument.
+    for (let j = 1; j < a.length; j++) {
+      if (CURL_SHORT_WITH_VALUE.includes(a[j])) return j === a.length - 1;
+    }
+    return false;
+  }
+
+  function curlDefaultScheme(protoDefault) {
+    if (protoDefault == null) return "http";
+    const p = String(protoDefault).toLowerCase();
+    return p === "http" || p === "https" ? p : null;
+  }
+
   function urlsFromListFile(path, stdinSize, options, skipped) {
     const cap = CLI_LIST_CAP;
     const maxUrls = 32;
@@ -1646,7 +1713,8 @@ globalThis.fetch = function vantioFetch(input, init) {
       const s = line.trim();
       if (!s || s.startsWith("#")) continue;
       const token = s.split(/\s+/)[0];
-      if (/^https?:\/\//i.test(token)) urls.push(token);
+      const found = httpUrlFromToken(token, "http");
+      if (found) urls.push(found);
       if (urls.length >= maxUrls) break;
     }
     return urls;
@@ -1725,7 +1793,8 @@ globalThis.fetch = function vantioFetch(input, init) {
         let rest = s.slice(3).trim();
         if (rest.startsWith("=")) rest = rest.slice(1).trim();
         rest = rest.replace(/^["']|["']$/g, "");
-        if (/^https?:\/\//i.test(rest)) return rest;
+        const found = httpUrlFromToken(rest, "http");
+        if (found) return found;
       }
     } catch { /* missing config — pass through */ }
     return null;
@@ -1734,6 +1803,11 @@ globalThis.fetch = function vantioFetch(input, init) {
   function parseCurlArgv(argv, stdinSize) {
     let url = null;
     let dataBytes = 0;
+    // The first argument with no scheme that is not an option value, the
+    // index of the next option value, and the --proto-default value.
+    let bare = null;
+    let valueAt = -1;
+    let protoDefault = null;
     const configPaths = [];
     const args = Array.isArray(argv) ? argv : [];
     for (let i = 0; i < args.length; i++) {
@@ -1810,8 +1884,21 @@ globalThis.fetch = function vantioFetch(input, init) {
         dataBytes += fileByteLength(a.slice(2), stdinSize);
         continue;
       }
-      if (!url && /^https?:\/\//i.test(a)) url = a;
+      if (/^https?:\/\//i.test(a)) {
+        if (!url) url = a;
+      } else if (a.startsWith("-") && a.length > 1) {
+        if (a === "--proto-default" && args[i + 1] != null) protoDefault = String(args[i + 1]);
+        else if (a.startsWith("--proto-default=")) protoDefault = a.slice("--proto-default=".length);
+        if (curlOptionTakesNextArg(a)) valueAt = i + 1;
+      } else if (i !== valueAt && bare == null && isSchemelessUrl(a)) {
+        bare = a;
+      }
     }
+    // A URL with no scheme: curl reads it as host[:port][/path] over http, or
+    // over --proto-default. One with a scheme wins, as before.
+    const scheme = curlDefaultScheme(protoDefault);
+    if (url && !/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) url = httpUrlFromToken(url, scheme) || url;
+    if (!url && bare && scheme) url = `${scheme}://${bare}`;
     const skipped = [];
     if (!url) {
       for (const p of configPaths) {
@@ -2192,7 +2279,7 @@ process.on("exit", () => {
   }
 
   if (process.env.VANTIO_JSON === "1") {
-    const rollup = rollupCalls(_calls);
+    const rollup = rollupCalls(counted);
     process.stderr.write(JSON.stringify({
       schema_status: SCHEMA_STATUS,
       event: "run_summary",
@@ -2214,7 +2301,7 @@ process.on("exit", () => {
     `${c.dim}[ ∅ VANTIO ]${c.reset} ${c.bold}Run Summary${c.reset}`,
     `  LLM calls:    ${c.yellow}${counted.length}${c.reset}`,
     `  Hosts:        ${c.cyan}${hosts.join(", ") || "none"}${c.reset}`,
-    `  Total bytes:  ${totalBytes > 0 ? totalBytes.toLocaleString() : "unknown"}`,
+    `  Total bytes:  ${totalBytes > 0 ? totalBytes.toLocaleString() : (counted.length === 0 ? "0" : "unknown")}`,
     `  Duration:     ${durationS}s`,
   ];
   if (noHost > 0) lines.push(`  Calls with no known host: ${noHost} (not counted above)`);

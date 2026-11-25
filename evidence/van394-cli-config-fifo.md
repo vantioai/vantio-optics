@@ -187,10 +187,119 @@ Node 22.23.5, pnpm 11.13.0, Python 3.13.18, Linux. Run on this commit's tree.
 ### Gaps
 
 - The no-host call is still recorded without a scope check. That was part of the same question; option A keeps the record.
-- Other readers were not changed: `vantio diff`, `search`, `tail`, `coverage`, `destinations`, `export`, and the `optics_discover_local` tool in `packages/vantio-optics-mcp` (`src/runs.js` still groups such calls under `unknown`). `vantio diff` falls back to counting `calls` only for a log with no `summary`.
+- Other readers were not changed: `vantio diff`, `search`, `tail`, `coverage`, `destinations`, `export`, and the `optics_discover_local` tool in `packages/vantio-optics-mcp` (`src/runs.js` still groups such calls under `unknown`). `vantio diff` counts from `calls` for a log with no `summary.by_host`, which includes Python run logs (corrected; see the next section).
 - `vantio prove` shows the lower totals but has no line for the no-host count.
 - A run log written before this commit keeps its old `summary`. `vantio discover` reads `calls`, so it treats old logs the new way.
 - `vantio discover --host` still prints the no-host line when the count is above 0.
 - The new wording has no sign-off yet.
 - Not run for this commit: the optics-mcp and agent-sdk packages (not touched), Python 3.10, 3.11 and 3.12, macOS, Windows, the drift check, the 25-run writer-first repro.
+- GitHub CI did not run (billing lock, VAN-129).
+
+## 2026-11-25: review round 3 (findings 1 to 5)
+
+A fresh review failed `ff58e31` with six findings. This section covers the one commit on top of `ff58e31` that answers findings 1 to 5. Finding 6 is left for a follow-up and stays in the gap list.
+
+### What changed, by finding
+
+1. **A known host with no scheme dropped out of the totals.** `curl -K /dev/null -d abc host/path` was recorded with no host. curl reads an argument with no scheme as `host[:port][/path]` over http, so the parsers now do the same.
+   - Node `bin/interceptor.cjs`: `isSchemelessUrl`, `httpUrlFromToken`, `curlOptionTakesNextArg`, `curlDefaultScheme`; used in `parseCurlArgv`, `urlFromCurlConfig` and `urlsFromListFile`.
+   - Python `vantio/_http_observe.py`: `_is_schemeless_url`, `_http_url_from_token`, `_curl_option_takes_next_arg`, `_curl_default_scheme`; used in `_parse_curl_argv`, `_url_from_curl_config` and `_urls_from_list_file`.
+   - The normal scope check then applies. A watched host is recorded and counted. A host that is not watched records nothing, as with `https://`.
+   - A value of a curl option is never read as a URL (`-o name`, `-H name`, `--proxy name`, `-sSo name` and the rest of curl's options that take a value). A URL with a scheme still wins over one without, as before.
+   - `--url name` and `--proto-default https` are honored. Names that curl reads as another protocol (`ftp.`, `dict.`, `ldap.`, `imap.`, `smtp.`, `pop3.`) are not taken.
+   - This also records `curl host/path` with no `-K`, which recorded nothing before.
+2. **`vantio prove` heading.** The call log heading now counts the rows. A line under the table names the no-host count. Same in the MCP prove (`packages/vantio-optics-mcp/src/runs.js`).
+3. **Other readers.**
+   - MCP `optics_discover_local`: no `unknown` row, not in `host_count`, new field `calls_without_host`. MCP `optics_list_runs` fallback totals leave no-host calls out.
+   - `vantio diff`: the fallback that counts from `calls` (used for a log with no `by_host`, such as a Python run log) leaves no-host calls out.
+   - `vantio coverage`: a no-host call is still listed in `connections`, but it gets no destination row and is not in `counts.connections`. New field `counts.calls_without_host` and one text line.
+   - `vantio destinations` already skipped these calls. `search`, `tail` and `export` list single calls and still list the row; their counts are row counts, so they were left as they are.
+4. **Run status.** The `run_summary` event, `vantio prove` and the Python run file now take the status from the counted calls. A no-host-only run is `NOT_OBSERVED` with 0 calls, as `discover` says.
+5. **Wording.** A no-host-only run prints `Total bytes:  0`. `vantio discover --host <x>` prints no no-host line, and its `--json` leaves the field out.
+
+Correction to the section above: it said `vantio diff` counts `calls` only for a log with no `summary`. That was wrong. It counts `calls` for any log with no `summary.by_host`, which includes every Python run log. This commit fixes that path.
+
+### Wording that a user sees (needs sign-off before release)
+
+Old is `ff58e31`.
+
+| Where | Old | New |
+| --- | --- | --- |
+| Run summary, a run with only a no-host call | `Total bytes:  unknown` | `Total bytes:  0` |
+| `vantio prove` (md and html), heading | `Call log (1 call)` over 2 rows (the count was the summary total) | `Call log (2 calls)` (the count is the rows) |
+| `vantio prove` (md and html), new line under the table, only when the count is above 0 | (none) | `Calls with no known host: 1 (listed above, not counted in the summary)` |
+| `vantio prove`, a no-host-only log, status cells | `Successful` | `Not observed` |
+| MCP prove, heading | `## Calls` | `## Calls (2)` |
+| MCP prove, new line under the table, only when the count is above 0 | (none) | `Calls with no known host: 1 (listed above, not counted in the summary)` |
+| `vantio coverage`, a no-host call | a destination row named `unknown` under "Outside authority", and counted in `Connections seen` | no row, not in `Connections seen` |
+| `vantio coverage`, new line, only when the count is above 0 | (none) | `Calls with no known host: 1 (not counted above)` |
+| `vantio diff`, a Python run log with a no-host call | `+ unknown  (1 call(s))` | (no line) |
+| `vantio discover --host <x>` | `Calls with no known host: 1 (not counted above)` | (no line) |
+
+No README or changelog text changed.
+
+### Tests
+
+Node `test/cli-config-fifo.test.js` has 32 tests (15 new). Python `tests/test_van394_cli_config_fifo.py` has 28 (6 new). `packages/vantio-optics-mcp/test/runs.test.js` has 3 (2 new). Old-code runs used a scratch copy of `ff58e31` under `/tmp` with the three test files put in.
+
+| Test | On `ff58e31` |
+| --- | --- |
+| Node 14 (now also expects `Total bytes: 0`) | fail |
+| Node 18: no scheme, watched host, `-K /dev/null`: counted with its host and bytes | fail |
+| Node 19: no scheme, watched host, no `-K`: recorded | fail |
+| Node 20 (negative): an option value that looks like a host is not recorded as a call | pass (old code never read such a value as a URL) |
+| Node 21 (negative): no scheme, host not watched: nothing recorded | pass (old code recorded nothing either) |
+| Node 22: no scheme in a curl config or a wget list | fail |
+| Node 23: no-host-only run reports `NOT_OBSERVED` with zero calls | fail |
+| Node 24 (negative): a run with a known-host call still reports `SUCCESS` | pass (unchanged behavior) |
+| Node 25, 26: prove heading, rows, line and status | fail |
+| Node 27 (negative): prove with known-host calls only | fail, only on the new `calls_without_host` field |
+| Node 28: diff, Python log, no `unknown` host | fail |
+| Node 29 (negative): diff still reports a new known host | fail (the old code also added `unknown`) |
+| Node 30: coverage, no row and its own count | fail |
+| Node 31 (negative): coverage with known-host calls only | fail, only on the new field |
+| Node 32: `discover --host` prints no no-host line | fail |
+| MCP 2: discover, list and prove | fail |
+| MCP 3 (negative): known-host call still counted | fail, only on the new field and the new heading |
+| Python: no scheme with `-K /dev/null`; no scheme without `-K`; no scheme in a config or list | fail, error, error |
+| Python: the four no-host tests (shared check now expects `NOT_OBSERVED`) | fail |
+| Python (negative): option value; host not watched; known-host run still `SUCCESS` | pass (unchanged behavior) |
+
+Six negative tests pass on the old code because they guard behavior that must not change.
+
+### Commands
+
+Node 22.23.5, pnpm 11.13.0, Python 3.13.18, Linux. Run on this commit's source tree.
+
+| Command | rc | Result |
+| --- | --- | --- |
+| `pnpm --filter @vantio/cli run lint` | 0 | |
+| `pnpm --filter @vantio/cli run test` | 0 | 212 tests: 211 pass, 1 skipped, 0 fail |
+| `pnpm --filter @vantio/optics-mcp run lint` | 0 | |
+| `pnpm --filter @vantio/optics-mcp run test` | 0 | 10 pass |
+| `pnpm --filter @vantio/agent-sdk run test` | 0 | 42 pass |
+| `pnpm run test:python` | 0 | 156 tests, OK, 2 skipped |
+| `node --test test/*.test.js` (repository root) | 0 | 5 pass |
+| `node --test test/cli-config-fifo.test.js` on the scratch copy of `ff58e31` | 1 | 32 tests: 19 pass, 13 fail |
+| `node --test test/runs.test.js` (optics-mcp) on the scratch copy | 1 | 3 tests: 1 pass, 2 fail |
+| `python3 -m unittest tests.test_van394_cli_config_fifo` on the scratch copy | 1 | 28 tests: 5 failures, 2 errors |
+| AGENTS.md secret scan | 0 | no pattern matched |
+
+### FIFO shapes, re-run
+
+Stand-in `curl -K` and `wget -i` with a FIFO (no writer), a symlink to it, a unix socket and `/dev/stdin`, in Node and under `shield()` in Python. 8 spawns per runtime. Every spawn returned in 7 ms or less. Each runtime recorded 8 calls with no host, `total_calls: 0`, `calls_without_host: 8`. Python's status was `NOT_OBSERVED`.
+
+### Gaps
+
+- From the review, finding 6, not in this commit: a URL past the first 1 MiB of a `-K` file is not recorded; `curl -K -` on a pipe is not recorded; `//dev/stdin` slips past the path check.
+- No-scheme URLs are read on curl's command line, in a curl config and in `-i` lists only. On the command line of wget, httpie and aria2c they are still not read: those tools have their own option rules (wget takes shortened long options; httpie mixes in method words and `key=value` items), and a value table for them was not built here.
+- The curl option table is a fixed list. An option that is not in it and takes a value could have that value read as a URL. It is then recorded only if the value is the name of a watched host. curl versions that accept shortened long options are not handled.
+- Not handled for no-scheme URLs: `user:password@host`, a `proto-default` line inside a config file, and more than one URL on a curl command line (the first one is used, as before).
+- A no-scheme call is recorded as http on port 80 unless `--proto-default https` is given. The scope check gets that port.
+- A run log written before option A keeps its old `summary` and `by_host`. Readers that use those fields show the old numbers for it.
+- `vantio coverage --json` still lists a no-host call in `connections`, with destination `unknown`. `counts.connections` is lower than that list by `counts.calls_without_host`.
+- `vantio tail --json` `total_calls` is the row count, as before.
+- The anonymous opt-in usage ping still sends the count of all recorded calls.
+- The new wording has no sign-off yet.
+- Not run for this commit: Python 3.10, 3.11 and 3.12, macOS, Windows, the drift check, the 25-run writer-first repro (the writer-first tests in both suites pass).
 - GitHub CI did not run (billing lock, VAN-129).

@@ -521,6 +521,9 @@ function observationFromCall(log, call, seq, localHost) {
     runtime: cleanToken(log.runtime, 32) || (log.node_version ? "node" : null),
     destination: destination || "unknown",
     display: destination || "unknown",
+    // VAN-394: a call with no known host is listed as a connection, but it
+    // gets no destination row and is left out of the connection count.
+    no_host: !destination,
     method: cleanToken(call && call.method, 16),
     path: stripPath(call && call.path),
     bytes: callBytes(call),
@@ -700,6 +703,7 @@ function buildCoverage(input) {
 
   const pathBuckets = new Map();
   const connections = [];
+  let noHostCalls = 0;
   for (const observation of observations) {
     const bucket = systemBucket(observation.system_hostname, observation.host_recorded);
     if (observation.kind === "process") {
@@ -747,29 +751,33 @@ function buildCoverage(input) {
         source: "run_log",
       });
     }
-    const pathKey = `${bucket.hostname}\n${observation.kind}\n${observation.display}`;
-    if (!pathBuckets.has(pathKey)) {
-      pathBuckets.set(pathKey, {
-        system_hostname: bucket.hostname,
-        destination: observation.display,
-        kind: observation.kind,
-        authority,
-        programs: [],
-        calls: 0,
-        bytes: 0,
-        first_time: observation.time,
-        bytes_known: false,
-        source: "record",
-      });
+    if (observation.no_host) {
+      noHostCalls += 1;
+    } else {
+      const pathKey = `${bucket.hostname}\n${observation.kind}\n${observation.display}`;
+      if (!pathBuckets.has(pathKey)) {
+        pathBuckets.set(pathKey, {
+          system_hostname: bucket.hostname,
+          destination: observation.display,
+          kind: observation.kind,
+          authority,
+          programs: [],
+          calls: 0,
+          bytes: 0,
+          first_time: observation.time,
+          bytes_known: false,
+          source: "record",
+        });
+      }
+      const path = pathBuckets.get(pathKey);
+      path.calls += 1;
+      if (observation.bytes != null) {
+        path.bytes += observation.bytes;
+        path.bytes_known = true;
+      }
+      if (observation.program && !path.programs.includes(observation.program)) path.programs.push(observation.program);
+      if (observation.time && (!path.first_time || observation.time < path.first_time)) path.first_time = observation.time;
     }
-    const path = pathBuckets.get(pathKey);
-    path.calls += 1;
-    if (observation.bytes != null) {
-      path.bytes += observation.bytes;
-      path.bytes_known = true;
-    }
-    if (observation.program && !path.programs.includes(observation.program)) path.programs.push(observation.program);
-    if (observation.time && (!path.first_time || observation.time < path.first_time)) path.first_time = observation.time;
 
     const child = spawnProgram(observation.mediation);
     if (child) {
@@ -891,7 +899,8 @@ function buildCoverage(input) {
     undated_excluded: input.undatedExcluded || 0,
     counts: {
       processes: processes.length,
-      connections: connections.length,
+      connections: connections.length - noHostCalls,
+      calls_without_host: noHostCalls,
       under_authority: systemList.reduce((sum, bucket) => sum + bucket.under_authority.length, 0),
       outside_authority: systemList.reduce((sum, bucket) => sum + bucket.outside_authority.length, 0),
     },
@@ -959,6 +968,9 @@ function formatCoverageText(coverage) {
   lines.push("");
   lines.push(`Processes seen: ${coverage.counts.processes}`);
   lines.push(`Connections seen: ${coverage.counts.connections}`);
+  if (coverage.counts.calls_without_host > 0) {
+    lines.push(`Calls with no known host: ${coverage.counts.calls_without_host} (not counted above)`);
+  }
   lines.push("");
   return `${lines.join("\n")}\n`;
 }

@@ -133,6 +133,7 @@ export function createOpticsMcpServer() {
         brand: "Vantio Optics",
         since_days: days,
         host_count: hosts.length,
+        calls_without_host: hosts.calls_without_host || 0,
         hosts,
         note: "Fleet-wide Shadow AI Discover with enforce status requires Vantio Phantom Engine.",
         upgrade: UPGRADE_PATH.next[0],

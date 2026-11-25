@@ -355,8 +355,8 @@ for (const argv of JSON.parse(process.env.VAN394_ARGVS)) spawnSync("curl", argv,
 const NO_HOST_ARGV = ["-K", "/dev/null", "-d", "x".repeat(5000)];
 const KNOWN_HOST_ARGV = ["-d", "y".repeat(300), "https://llm.example.test/v1/x"];
 
-async function runCurls(trace, argvs) {
-  const t = fakeEnv("curl", { VANTIO_TRACE_ID: trace, VAN394_ARGVS: JSON.stringify(argvs) });
+async function runCurls(trace, argvs, extraEnv) {
+  const t = fakeEnv("curl", { VANTIO_TRACE_ID: trace, VAN394_ARGVS: JSON.stringify(argvs), ...extraEnv });
   const { code, signal, stderr } = await runAgent(SPAWN_EACH_SCRIPT, t.env);
   assert.equal(signal, null, `the agent was killed: ${stderr}`);
   assert.equal(code, 0, `stderr: ${stderr}`);
@@ -386,6 +386,7 @@ test("a run with only a no-host call shows zero LLM calls and the no-host count"
   assert.equal(log.summary.total_bytes, 0);
   assert.match(summaryText, /LLM calls: +0\n/);
   assert.match(summaryText, /Hosts: +none\n/);
+  assert.match(summaryText, /Total bytes: +0\n/, "the run file says 0, so the summary says 0");
   assert.match(summaryText, /Calls with no known host: 1 \(not counted above\)\n/);
 });
 
@@ -443,4 +444,214 @@ test("vantio discover still counts a known-host call with its bytes, and prints 
   const text = discoverLocal([KNOWN_HOST_CALL], []);
   assert.match(text, /llm\.example\.test +1 +300 /);
   assert.ok(!text.includes("no known host"), text);
+});
+
+// ── Review round 3 ──
+
+// 1. curl reads a URL with no scheme as host[:port][/path] over http.
+
+test("a URL with no scheme to a watched host, with -K /dev/null, is counted with its host and bytes", { timeout: 20000 }, async () => {
+  const { log } = await runCurls("van394bare", [["-K", "/dev/null", "-d", "abc", "llm.example.test/v1/chat"]]);
+  assert.deepEqual(log.calls.map((c) => [c.hostname, c.bytes]), [["llm.example.test", 3]]);
+  assert.equal(log.summary.total_calls, 1);
+  assert.equal(log.summary.total_bytes, 3);
+  assert.equal(log.summary.calls_without_host, 0);
+  assert.deepEqual(log.summary.by_host, { "llm.example.test": { calls: 1, bytes: 3, errors: 0 } });
+});
+
+test("a URL with no scheme to a watched host, without -K, is recorded", { timeout: 20000 }, async () => {
+  const { log } = await runCurls("van394barenok", [
+    ["-sS", "-d", "abc", "llm.example.test/v1/chat"],
+    ["-o", "out.txt", "llm.example.test:8080"],
+    ["--url", "llm.example.test/v1"],
+    ["--proto-default", "https", "llm.example.test"],
+  ]);
+  assert.deepEqual(log.calls.map((c) => [c.hostname, c.bytes]), [
+    ["llm.example.test", 3], ["llm.example.test", 0], ["llm.example.test", 0], ["llm.example.test", 0],
+  ]);
+  assert.equal(log.summary.total_calls, 4);
+});
+
+test("an option value that looks like a host is not recorded as a call", { timeout: 20000 }, async () => {
+  const { log } = await runCurls("van394optvalue", [
+    ["-o", "llm.example.test", "-H", "llm.example.test", "--proxy", "llm.example.test", "-sSo", "llm.example.test", "https://other.example.test/x"],
+    ["-d", "llm.example.test", "--data-raw", "llm.example.test", "-F", "llm.example.test"],
+    ["--user-agent", "llm.example.test", "-e", "llm.example.test", "ftp.llm.example.test"],
+  ]);
+  assert.deepEqual(log.calls, []);
+  // With a skipped config file the call is recorded, but not under that name.
+  const skipped = await runCurls("van394optvaluek", [["-K", "/dev/null", "-o", "llm.example.test"]]);
+  assert.deepEqual(skipped.log.calls.map((c) => c.hostname), [null]);
+  assert.equal(skipped.log.summary.total_calls, 0);
+});
+
+test("a URL with no scheme to a host that is not watched records nothing, as with https://", { timeout: 20000 }, async () => {
+  const { log } = await runCurls("van394bareother", [["other.example.test/v1/x"], ["https://other.example.test/v1/x"]]);
+  assert.deepEqual(log.calls, []);
+});
+
+test("a URL with no scheme in a curl config or a wget list is read the same way", { timeout: 30000 }, async () => {
+  const cases = [
+    ["curl", 'url = "llm.example.test/v1/x"\n', ["llm.example.test"]],
+    ["wget", "llm.example.test/v1/x\n", ["llm.example.test"]],
+    ["curl", 'url = "other.example.test/v1/x"\noutput = "llm.example.test"\n', []],
+    ["wget", "other.example.test/v1/x\n# llm.example.test\n", []],
+  ];
+  for (const [i, [tool, content, hosts]] of cases.entries()) {
+    const trace = `van394barefile${i}`;
+    const t = await spawnOnce(tool, trace, regularFile(content));
+    assert.deepEqual(readRun(t.home, trace).log.calls.map((c) => c.hostname), hosts, `${tool} ${JSON.stringify(content)}`);
+  }
+});
+
+// 4. The run status uses the same counted set as the totals.
+
+function runSummaryEvent(stderr) {
+  const line = stderr.split("\n").find((l) => l.includes('"run_summary"'));
+  assert.ok(line, `no run_summary event in: ${stderr}`);
+  return JSON.parse(line);
+}
+
+test("a run with only a no-host call reports NOT_OBSERVED with zero calls", { timeout: 20000 }, async () => {
+  const { summaryText } = await runCurls("van394status", [NO_HOST_ARGV], { VANTIO_JSON: "1" });
+  const event = runSummaryEvent(summaryText);
+  assert.equal(event.calls, 0);
+  assert.equal(event.calls_without_host, 1);
+  assert.equal(event.opticsStatus, "NOT_OBSERVED");
+  assert.equal(event.applicationStatus, "NOT_OBSERVED");
+});
+
+test("a run with a known-host call still reports SUCCESS", { timeout: 20000 }, async () => {
+  const { summaryText } = await runCurls("van394statusknown", [NO_HOST_ARGV, KNOWN_HOST_ARGV], { VANTIO_JSON: "1" });
+  const event = runSummaryEvent(summaryText);
+  assert.equal(event.calls, 1);
+  assert.equal(event.opticsStatus, "SUCCESS");
+});
+
+// 2, 3 and 5. The readers agree with the run summary.
+
+function cliWithLogs(logs) {
+  const home = mkdtempSync(join(tmpdir(), "van394-readers-"));
+  const runs = join(home, ".vantio", "runs");
+  mkdirSync(runs, { recursive: true });
+  for (const log of logs) {
+    writeFileSync(join(runs, `${log.trace_id}.json`), JSON.stringify({
+      vantio_run_log: "1",
+      generated_at: new Date().toISOString(),
+      started_at: new Date().toISOString(),
+      ...log,
+    }));
+  }
+  return (args) => {
+    const run = spawnSync(process.execPath, [CLI_PATH, ...args], {
+      env: { PATH: process.env.PATH, HOME: home },
+      encoding: "utf8",
+      timeout: 15000,
+    });
+    assert.equal(run.status, 0, run.stderr);
+    return run.stdout;
+  };
+}
+
+// A Node run log written under option A, and a Python one (no by_host).
+const MIXED_NODE_LOG = {
+  trace_id: "van394mixed",
+  calls: [NO_HOST_CALL, KNOWN_HOST_CALL],
+  summary: { total_calls: 1, total_bytes: 300, calls_without_host: 1, hosts: ["llm.example.test"] },
+};
+const KNOWN_NODE_LOG = {
+  trace_id: "van394known",
+  calls: [KNOWN_HOST_CALL],
+  summary: { total_calls: 1, total_bytes: 300, calls_without_host: 0, hosts: ["llm.example.test"] },
+};
+
+test("vantio prove: the call log heading matches its rows and names the no-host count", { timeout: 40000 }, () => {
+  const cli = cliWithLogs([MIXED_NODE_LOG]);
+  const md = cli(["prove", "--run=van394mixed", "--format=md"]);
+  assert.match(md, /## Call log \(2 calls\)\n/);
+  assert.equal(md.split("\n").filter((l) => /^\| \d+ \|/.test(l)).length, 2, "both rows are listed");
+  assert.match(md, /\| Total calls \| \*\*1\*\* \|/);
+  assert.match(md, /\nCalls with no known host: 1 \(listed above, not counted in the summary\)\n/);
+  const htmlPath = join(mkdtempSync(join(tmpdir(), "van394-proof-")), "proof.html");
+  cli(["prove", "--run=van394mixed", "--format=html", `--out=${htmlPath}`]);
+  const html = readFileSync(htmlPath, "utf8");
+  assert.match(html, /<h2>Call log \(2 calls\)<\/h2>/);
+  assert.match(html, /Calls with no known host: 1 \(listed above, not counted in the summary\)/);
+  const json = JSON.parse(cli(["prove", "--run=van394mixed", "--json"]));
+  assert.equal(json.calls.length, 2);
+  assert.equal(json.summary.total_calls, 1);
+  assert.equal(json.summary.calls_without_host, 1);
+});
+
+test("vantio prove: a no-host-only log is not reported as a successful observation", { timeout: 40000 }, () => {
+  const cli = cliWithLogs([{ trace_id: "van394only", calls: [NO_HOST_CALL] }]);
+  const json = JSON.parse(cli(["prove", "--run=van394only", "--json"]));
+  assert.equal(json.opticsStatus, "NOT_OBSERVED");
+  assert.equal(json.summary.total_calls, 0);
+  assert.equal(json.summary.total_bytes, 0);
+  assert.equal(json.calls.length, 1, "the row is still listed");
+});
+
+test("vantio prove: a log with only known-host calls has no no-host line", { timeout: 40000 }, () => {
+  const cli = cliWithLogs([KNOWN_NODE_LOG]);
+  const md = cli(["prove", "--run=van394known", "--format=md"]);
+  assert.match(md, /## Call log \(1 call\)\n/);
+  assert.ok(!md.includes("no known host"), md);
+  const json = JSON.parse(cli(["prove", "--run=van394known", "--json"]));
+  assert.equal(json.opticsStatus, "SUCCESS");
+  assert.equal(json.summary.calls_without_host, 0);
+});
+
+test("vantio diff: a Python run log with a no-host call adds no `unknown` host", { timeout: 40000 }, () => {
+  // Python run logs have no by_host and no total_bytes.
+  const cli = cliWithLogs([
+    { trace_id: "van394pya", runtime: "python", calls: [KNOWN_HOST_CALL], summary: { hosts: ["llm.example.test"] } },
+    { trace_id: "van394pyb", runtime: "python", calls: [KNOWN_HOST_CALL, NO_HOST_CALL], summary: { hosts: ["llm.example.test"] } },
+  ]);
+  const json = JSON.parse(cli(["diff", "van394pya", "van394pyb", "--json"]));
+  const text = JSON.stringify(json);
+  assert.ok(!text.includes("unknown"), text);
+  assert.equal(json.delta_calls, 0);
+  assert.equal(json.delta_bytes, 0);
+});
+
+test("vantio diff: a new known host is still reported with its calls and bytes", { timeout: 40000 }, () => {
+  const other = { ...KNOWN_HOST_CALL, hostname: "llm2.example.test", bytes: 70 };
+  const cli = cliWithLogs([
+    { trace_id: "van394pyc", runtime: "python", calls: [KNOWN_HOST_CALL] },
+    { trace_id: "van394pyd", runtime: "python", calls: [KNOWN_HOST_CALL, other, NO_HOST_CALL] },
+  ]);
+  const json = JSON.parse(cli(["diff", "van394pyc", "van394pyd", "--json"]));
+  assert.equal(json.delta_calls, 1);
+  assert.equal(json.delta_bytes, 70);
+  assert.ok(JSON.stringify(json).includes("llm2.example.test"));
+  assert.ok(!JSON.stringify(json).includes("unknown"));
+});
+
+test("vantio coverage: a no-host call gets no destination row and its own count", { timeout: 40000 }, () => {
+  const cli = cliWithLogs([{ trace_id: "van394cov", program: "agent.js", calls: [NO_HOST_CALL, KNOWN_HOST_CALL] }]);
+  const json = JSON.parse(cli(["coverage", "--json"]));
+  const rows = json.systems.flatMap((sys) => [...sys.under_authority, ...sys.outside_authority]);
+  const mine = rows.filter((r) => r.destination === "llm.example.test");
+  assert.deepEqual(mine.map((r) => [r.calls, r.bytes]), [[1, 300]]);
+  assert.ok(!rows.some((r) => r.destination === "unknown"), JSON.stringify(rows));
+  assert.equal(json.counts.calls_without_host, 1);
+  assert.equal(json.connections.filter((c) => c.trace_id === "van394cov").length, 2, "both connections are listed");
+  assert.match(cli(["coverage"]), /\nCalls with no known host: 1 \(not counted above\)\n/);
+});
+
+test("vantio coverage: with only known-host calls there is no no-host line", { timeout: 40000 }, () => {
+  const cli = cliWithLogs([{ trace_id: "van394cov2", program: "agent.js", calls: [KNOWN_HOST_CALL] }]);
+  const json = JSON.parse(cli(["coverage", "--json"]));
+  assert.equal(json.counts.calls_without_host, 0);
+  assert.ok(!cli(["coverage"]).includes("no known host"));
+});
+
+test("vantio discover --host prints no no-host line; without --host it does", { timeout: 40000 }, () => {
+  const filtered = discoverLocal([NO_HOST_CALL, KNOWN_HOST_CALL], ["--host=llm.example"]);
+  assert.match(filtered, /llm\.example\.test +1 +300 /);
+  assert.ok(!filtered.includes("no known host"), filtered);
+  const filteredJson = JSON.parse(discoverLocal([NO_HOST_CALL, KNOWN_HOST_CALL], ["--host=llm.example", "--json"]));
+  assert.ok(!("calls_without_host" in filteredJson));
+  assert.match(discoverLocal([NO_HOST_CALL, KNOWN_HOST_CALL], []), /Calls with no known host: 1 \(not counted above\)\n/);
 });

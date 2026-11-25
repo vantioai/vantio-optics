@@ -1637,6 +1637,85 @@ def _bytes_from_curl_form_value(value: Any, treat_at_as_file: bool, stdin_size: 
     return len(rhs.encode("utf-8"))
 
 
+# curl reads an argument with no scheme as host[:port][/path] and uses http
+# (VAN-394). A name that starts with ftp., dict., ldap., imap., smtp. or pop3.
+# is read by curl as that protocol, so it is not taken here.
+_SCHEMELESS_URL_RE = re.compile(
+    r"^(localhost|(?:\d{1,3}\.){3}\d{1,3}|\[[0-9a-f:.]+\]"
+    r"|(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]*[a-z0-9])"
+    r"(?::\d{1,5})?(?:[/?#]\S*)?$",
+    re.IGNORECASE | re.ASCII,
+)
+_SCHEMELESS_OTHER_PROTOCOL_RE = re.compile(r"^(?:ftp|dict|ldap|imap|smtp|pop3)\.", re.IGNORECASE)
+_HTTP_URL_RE = re.compile(r"^https?://", re.IGNORECASE)
+_ANY_SCHEME_RE = re.compile(r"^[a-z][a-z0-9+.-]*://", re.IGNORECASE)
+
+
+def _is_schemeless_url(token: str) -> bool:
+    text = str(token or "")
+    return bool(_SCHEMELESS_URL_RE.match(text)) and not _SCHEMELESS_OTHER_PROTOCOL_RE.match(text)
+
+
+def _http_url_from_token(token: str, default_scheme: Optional[str]) -> Optional[str]:
+    """Return the URL with a scheme, or None when the token is not a URL."""
+    text = str(token or "")
+    if _HTTP_URL_RE.match(text):
+        return text
+    if default_scheme and _is_schemeless_url(text):
+        return f"{default_scheme}://{text}"
+    return None
+
+
+# curl options whose value is the next argument. A value is never a URL, so
+# `-o api.example.test` is not read as a call. Options the parser handles
+# itself (-d, -F, -T, -K, --url and their long forms) are listed too.
+_CURL_SHORT_WITH_VALUE = "AbcCdDeEFHKmoPQrtTuUwxXyYz"
+_CURL_LONG_WITH_VALUE = frozenset((
+    "abstract-unix-socket", "alt-svc", "aws-sigv4", "cacert", "capath", "cert", "cert-type", "ciphers",
+    "config", "connect-timeout", "connect-to", "continue-at", "cookie", "cookie-jar", "create-file-mode",
+    "crlfile", "curves", "data", "data-ascii", "data-binary", "data-raw", "data-urlencode", "delegation",
+    "dns-interface", "dns-ipv4-addr", "dns-ipv6-addr", "dns-servers", "doh-url", "dump-header", "ech",
+    "egd-file", "engine", "etag-compare", "etag-save", "expect100-timeout", "form", "form-string",
+    "ftp-account", "ftp-alternative-to-user", "ftp-method", "ftp-port", "ftp-ssl-ccc-mode",
+    "happy-eyeballs-timeout-ms", "haproxy-clientip", "header", "hostpubmd5", "hostpubsha256", "hsts",
+    "interface", "ip-tos", "ipfs-gateway", "json", "keepalive-cnt", "keepalive-time", "key", "key-type",
+    "krb", "libcurl", "limit-rate", "local-port", "login-options", "mail-auth", "mail-from", "mail-rcpt",
+    "max-filesize", "max-redirs", "max-time", "netrc-file", "noproxy", "oauth2-bearer", "output",
+    "output-dir", "parallel-max", "pass", "pinnedpubkey", "preproxy", "proto", "proto-default",
+    "proto-redir", "proxy", "proxy-cacert", "proxy-capath", "proxy-cert", "proxy-cert-type",
+    "proxy-ciphers", "proxy-crlfile", "proxy-header", "proxy-key", "proxy-key-type", "proxy-pass",
+    "proxy-pinnedpubkey", "proxy-service-name", "proxy-tls13-ciphers", "proxy-tlsauthtype",
+    "proxy-tlspassword", "proxy-tlsuser", "proxy-user", "proxy1.0", "pubkey", "quote", "random-file",
+    "range", "rate", "referer", "request", "request-target", "resolve", "retry", "retry-delay",
+    "retry-max-time", "sasl-authzid", "service-name", "socks4", "socks4a", "socks5",
+    "socks5-gssapi-service", "socks5-hostname", "speed-limit", "speed-time", "stderr", "telnet-option",
+    "tftp-blksize", "time-cond", "tls-max", "tls13-ciphers", "tlsauthtype", "tlspassword", "tlsuser",
+    "trace", "trace-ascii", "trace-config", "unix-socket", "upload-file", "url", "url-query", "user",
+    "user-agent", "variable", "vlan-priority", "write-out",
+))
+
+
+def _curl_option_takes_next_arg(a: str) -> bool:
+    if a.startswith("--"):
+        if "=" in a:
+            return False
+        name = a[2:]
+        return name in _CURL_LONG_WITH_VALUE or name.startswith("expand-")
+    # A short cluster such as -sSo: the first letter that takes a value ends
+    # it. The value is the rest of the argument, or the next argument.
+    for j in range(1, len(a)):
+        if a[j] in _CURL_SHORT_WITH_VALUE:
+            return j == len(a) - 1
+    return False
+
+
+def _curl_default_scheme(proto_default: Optional[str]) -> Optional[str]:
+    if proto_default is None:
+        return "http"
+    scheme = str(proto_default).lower()
+    return scheme if scheme in ("http", "https") else None
+
+
 def _urls_from_list_file(
     path: str,
     stdin_size: int = 0,
@@ -1681,8 +1760,9 @@ def _urls_from_list_file(
         if not s or s.startswith("#"):
             continue
         token = s.split()[0]
-        if token.startswith("http://") or token.startswith("https://"):
-            urls.append(token)
+        found = _http_url_from_token(token, "http")
+        if found:
+            urls.append(found)
         if len(urls) >= max_urls:
             break
     return urls
@@ -1774,8 +1854,9 @@ def _url_from_curl_config(path: str, skipped: Optional[list[str]] = None) -> Opt
         if rest.startswith("="):
             rest = rest[1:].strip()
         rest = rest.strip("\"'")
-        if rest.startswith("http://") or rest.startswith("https://"):
-            return rest
+        found = _http_url_from_token(rest, "http")
+        if found:
+            return found
     return None
 
 
@@ -1784,6 +1865,11 @@ def _parse_curl_argv(
 ) -> tuple[list[str], int]:
     url: Optional[str] = None
     data_bytes = 0
+    # The first argument with no scheme that is not an option value, the index
+    # of the next option value, and the --proto-default value.
+    bare: Optional[str] = None
+    value_at = -1
+    proto_default: Optional[str] = None
     config_paths: list[str] = []
     args = [str(a) for a in argv]
     i = 0
@@ -1856,10 +1942,27 @@ def _parse_curl_argv(
             data_bytes += _file_byte_length(a[2:], stdin_size)
             i += 1
             continue
-        if url is None and (a.startswith("http://") or a.startswith("https://")):
-            url = a
+        if _HTTP_URL_RE.match(a):
+            if url is None:
+                url = a
+        elif a.startswith("-") and len(a) > 1:
+            if a == "--proto-default" and i + 1 < len(args):
+                proto_default = args[i + 1]
+            elif a.startswith("--proto-default="):
+                proto_default = a[len("--proto-default="):]
+            if _curl_option_takes_next_arg(a):
+                value_at = i + 1
+        elif i != value_at and bare is None and _is_schemeless_url(a):
+            bare = a
         i += 1
-    if url is None:
+    # A URL with no scheme: curl reads it as host[:port][/path] over http, or
+    # over --proto-default. One with a scheme wins, as before.
+    scheme = _curl_default_scheme(proto_default)
+    if url and not _ANY_SCHEME_RE.match(url):
+        url = _http_url_from_token(url, scheme) or url
+    if not url and bare and scheme:
+        url = f"{scheme}://{bare}"
+    if not url:
         for path in config_paths:
             found = _url_from_curl_config(path, skipped)
             if found:
@@ -2217,8 +2320,8 @@ def _write_run_log() -> None:
         counted = [c for c in _calls if c.get("hostname")]
         hosts = sorted({c["hostname"] for c in counted})
         mediations = sorted({c.get("mediation") or "python_urllib" for c in _calls})
-        optics_status, application_status = _rollup_status(_calls)
-        customer = summarize_customer_fields(_calls, application_status)
+        optics_status, application_status = _rollup_status(counted)
+        customer = summarize_customer_fields(counted, application_status)
         payload = {
             "vantio_run_log": "1",
             "schema_version": 2,

@@ -286,6 +286,9 @@ class FakeToolUnderShieldTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(log["summary"]["hosts"], [], "no host is counted")
         self.assertEqual(log["summary"]["total_calls"], 0)
         self.assertEqual(log["summary"]["calls_without_host"], 1)
+        # The run status uses the same counted set as the totals.
+        self.assertEqual(log["summary"]["opticsStatus"], "NOT_OBSERVED")
+        self.assertEqual(log["summary"]["applicationStatus"], "NOT_OBSERVED")
         for piece in ("llm.example.test", "s3cret"):
             self.assertNotIn(piece, text)
 
@@ -433,6 +436,86 @@ class FakeToolUnderShieldTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(log["summary"]["total_calls"], 1)
         self.assertEqual(log["summary"]["calls_without_host"], 0)
         self.assertEqual(log["summary"]["hosts"], ["llm.example.test"])
+
+    # Review round 3. curl reads a URL with no scheme as host[:port][/path]
+    # over http.
+
+    def _hosts_and_bytes(self, log: dict) -> list:
+        return [[c["hostname"], c["bytes_observed"]] for c in log["calls"]]
+
+    async def test_a_url_with_no_scheme_with_k_dev_null_is_counted_with_its_host_and_bytes(self) -> None:
+        log = await self._run_curls("van394-bare", [["-K", "/dev/null", "-d", "abc", "llm.example.test/v1/chat"]])
+        self.assertEqual(self._hosts_and_bytes(log), [["llm.example.test", 3]])
+        self.assertEqual(log["summary"]["total_calls"], 1)
+        self.assertEqual(log["summary"]["calls_without_host"], 0)
+        self.assertEqual(log["summary"]["hosts"], ["llm.example.test"])
+
+    async def test_a_url_with_no_scheme_without_k_is_recorded(self) -> None:
+        log = await self._run_curls(
+            "van394-bare-no-k",
+            [
+                ["-sS", "-d", "abc", "llm.example.test/v1/chat"],
+                ["-o", "out.txt", "llm.example.test:8080"],
+                ["--url", "llm.example.test/v1"],
+                ["--proto-default", "https", "llm.example.test"],
+            ],
+        )
+        self.assertEqual(
+            self._hosts_and_bytes(log),
+            [["llm.example.test", 3], ["llm.example.test", 0], ["llm.example.test", 0], ["llm.example.test", 0]],
+        )
+        self.assertEqual(log["summary"]["total_calls"], 4)
+
+    async def test_an_option_value_that_looks_like_a_host_is_not_recorded_as_a_call(self) -> None:
+        def body(result: dict) -> None:
+            for argv in (
+                ["-o", "llm.example.test", "-H", "llm.example.test", "--proxy", "llm.example.test",
+                 "-sSo", "llm.example.test", "https://other.example.test/x"],
+                ["-d", "llm.example.test", "--data-raw", "llm.example.test", "-F", "llm.example.test"],
+                ["--user-agent", "llm.example.test", "-e", "llm.example.test", "ftp.llm.example.test"],
+            ):
+                self._wait(subprocess.Popen(["curl", *argv], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+
+        await self._under_shield("van394-opt-value", body)
+        # The Python wrapper writes no run file when nothing was recorded.
+        self.assertFalse(os.path.exists(self._run_file("van394-opt-value")))
+        # With a skipped config file the call is recorded, but not under that name.
+        log = await self._run_curls("van394-opt-value-k", [["-K", "/dev/null", "-o", "llm.example.test"]])
+        self.assertEqual([c["hostname"] for c in log["calls"]], [None])
+        self.assertEqual(log["summary"]["total_calls"], 0)
+
+    async def test_a_url_with_no_scheme_to_a_host_that_is_not_watched_records_nothing(self) -> None:
+        def body(result: dict) -> None:
+            for argv in (["other.example.test/v1/x"], ["https://other.example.test/v1/x"]):
+                self._wait(subprocess.Popen(["curl", *argv], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+
+        await self._under_shield("van394-bare-other", body)
+        self.assertFalse(os.path.exists(self._run_file("van394-bare-other")))
+
+    async def test_a_url_with_no_scheme_in_a_curl_config_or_a_wget_list(self) -> None:
+        cases = (
+            ("curl", "-K", 'url = "llm.example.test/v1/x"\n', True),
+            ("wget", "-i", "llm.example.test/v1/x\n", True),
+            ("curl", "-K", 'url = "other.example.test/v1/x"\noutput = "llm.example.test"\n', False),
+            ("wget", "-i", "other.example.test/v1/x\n# llm.example.test\n", False),
+        )
+        for i, (tool, flag, content, recorded) in enumerate(cases):
+            target = os.path.join(self.work, f"bare-file-{i}")
+            with open(target, "w", encoding="utf-8") as fh:
+                fh.write(content)
+            trace = f"van394-bare-file-{i}"
+            await self._spawn_with_file(trace, tool, flag, target)
+            if not recorded:
+                self.assertFalse(os.path.exists(self._run_file(trace)), content)
+                continue
+            with open(self._run_file(trace), encoding="utf-8") as fh:
+                log = json.load(fh)
+            self.assertEqual([c["hostname"] for c in log["calls"]], ["llm.example.test"], content)
+
+    async def test_a_run_with_a_known_host_call_still_reports_success(self) -> None:
+        log = await self._run_curls("van394-status-known", [_NO_HOST_ARGV, _KNOWN_HOST_ARGV])
+        self.assertEqual(log["summary"]["total_calls"], 1)
+        self.assertEqual(log["summary"]["opticsStatus"], "SUCCESS")
 
 
 _NO_HOST_ARGV = ["-K", "/dev/null", "-d", "x" * 5000]
