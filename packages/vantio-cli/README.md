@@ -111,6 +111,24 @@ vantio run --mcp-enforce node agent.js
 
 Intercepted calls print to the terminal in real time.
 
+### Signals
+
+`vantio run` passes SIGTERM, SIGINT and SIGHUP to the program it started. It then waits for that program to stop and writes the run record. A second signal is passed on too. It never ends `vantio run` while the program is still alive.
+
+`vantio run` exits the way the program exited. If the program exits with a code, `vantio run` exits with that code. If a signal ended the program, `vantio run` ends itself with the same signal, so a shell reports 128 plus the signal number (SIGTERM gives 143). `vantio run` does not start a new process group or session. The signal goes to the program only, not to a group.
+
+From a terminal, Ctrl+C already reaches the program directly. The program can then see SIGINT twice: once from the terminal and once from `vantio run`.
+
+### Running record
+
+A program that does not exit, such as a service, keeps a run record in `~/.vantio/runs/` while it runs. The record is marked `"run_state": "running"` and carries `update_interval_ms`. It is rewritten with a temp file and a rename, so a reader never sees half a file. It holds the same metadata as the final record: no request bodies and no header values.
+
+- The record is rewritten every 5 seconds and when the program reaches a new destination (at most 4 times a second).
+- `VANTIO_RUN_RECORD_INTERVAL_MS` changes the interval. Values below 1000 are raised to 1000. `0` or `off` turns the running record off, and only the final record is written. This applies to Node, Python, and other programs started by `vantio run`.
+- When the program exits, the final record replaces it. The final record has no `run_state`.
+- If `vantio run` itself is killed with SIGKILL, or the machine loses power, the last running record stays on disk. It is still marked `running`. A reader compares `generated_at` with `update_interval_ms`. After 3 intervals (at least 15 seconds) without an update, readers show the run as **unfinished**: the program may have crashed or been killed. The calls up to the last update are kept.
+- `vantio discover`, `vantio prove`, `vantio diff`, `vantio coverage` and the MCP run list show a running or unfinished run as such. They do not treat it as a finished run.
+
 ---
 
 ## vantio prove — proof artifacts
@@ -258,6 +276,7 @@ Prompts, completions, header values, and query strings are not export fields.
 | `VANTIO_TELEMETRY` | Set to `1` to opt **in** to usage telemetry (disabled by default) |
 | `VANTIO_TELEMETRY_DISABLED` | Set to `1` to explicitly disable telemetry (overrides `VANTIO_TELEMETRY=1`) |
 | `DO_NOT_TRACK` | Set to `1` to disable telemetry (overrides `VANTIO_TELEMETRY=1`) |
+| `VANTIO_RUN_RECORD_INTERVAL_MS` | Milliseconds between updates of the running record of a program that has not exited. Default `5000`. Values below `1000` become `1000`. `0` or `off` writes only the final record. |
 | `VANTIO_EXPORT_JSONL` | JSON-lines path used by `vantio export` when `--jsonl` is omitted. |
 | `VANTIO_EXPORT_OTLP` | OTLP/HTTP base URL used when `--otlp` is omitted. |
 | `VANTIO_EXPORT_OTLP_GRPC` | OTLP/gRPC URL used when `--otlp-grpc` is omitted. |
@@ -315,6 +334,12 @@ Telemetry is disabled by default. Set VANTIO_TELEMETRY=1 to opt in. VANTIO_TELEM
 Auto-intercepts LLM calls when running **Node.js** processes (`node`, `tsx`, `ts-node`, `npx`) — Node `fetch`, `undici.fetch`, `undici.request`, `undici.stream` / `pipeline` / `dispatch` / `connect` / `upgrade` (including tunnel bytes after upgrade), Node `http`/`https` including `ClientRequest`, Node `http2`, Node `net`/`tls`, `WebSocket` outbound frame size, and Node-spawned `curl` and `wget` (including `env` / `timeout` / `nice`, `curl -K` `url=`, `curl -F` size from stat, stdin size when stdin is a file, `wget -i` URL lists, `sh -c`, and file-body size from `--post-file` / `@file`). Spawned httpie and aria2c argv URLs are included in the same local record. The running version is `vantio --version`.
 
 Python, Ruby, and other runtimes are spawned without this Node interceptor. For Python, install the [Python SDK](https://pypi.org/project/vantio-agent-sdk) (`vantio-agent-sdk`) and then `vantio run python agent.py` or `shield()` — urllib / http.client / requests / httpx / aiohttp / urllib3 / pycurl / socket.connect / subprocess curl and wget.
+
+### Known limits
+
+- A program that is not Node or Python has no hook inside it. `vantio run` reads the local process list and the TCP socket table about every 20 ms. A Go binary, or `curl` run from a shell script, shows up in the process list. A short connection can open and close between two reads, and then no destination is recorded.
+- A Node program started by a Python or shell parent is not hooked. The hook is only loaded when `vantio run` starts Node itself. To hook it, pass `NODE_OPTIONS=--require <path to interceptor.cjs>` to that child by hand.
+- `vantio coverage` reads the local process table, the TCP socket tables and the run records. It does not capture traffic. A program that is not in those places is not listed.
 
 ---
 

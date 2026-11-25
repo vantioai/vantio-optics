@@ -10,6 +10,18 @@ export function runsDir(root = process.env.VANTIO_HOME || join(homedir(), ".vant
   return join(root, "runs");
 }
 
+// Same rule as the CLI (runStateOf in @vantio/cli). A record with run_state
+// "running" is a program that has not exited. If its last update is older than
+// 3 intervals (at least 15 s), it is "unfinished": the program may have crashed
+// or been killed, and the record is its last update.
+export function runStateOf(log, nowMs = Date.now()) {
+  if (!log || log.run_state !== "running") return "finished";
+  const interval = Number(log.update_interval_ms) > 0 ? Number(log.update_interval_ms) : 5000;
+  const stamp = Date.parse(log.generated_at);
+  if (Number.isNaN(stamp)) return "unfinished";
+  return Math.max(0, nowMs - stamp) <= Math.max(15000, interval * 3) ? "running" : "unfinished";
+}
+
 export function listRunLogs(dir = runsDir()) {
   let names;
   try {
@@ -36,6 +48,7 @@ export function listRunLogs(dir = runsDir()) {
         started_at: log.started_at ?? null,
         generated_at: log.generated_at ?? null,
         duration_ms: log.duration_ms ?? null,
+        run_state: runStateOf(log),
         total_calls: summary.total_calls ?? calls.length,
         total_bytes: summary.total_bytes ?? calls.reduce((a, c) => a + (c.bytes || 0), 0),
         hosts: Array.isArray(summary.hosts)
@@ -122,6 +135,7 @@ export function proveMarkdown(log) {
     `| Node | ${log.node_version || "—"} |`,
     `| Platform | ${log.platform || "—"} ${log.arch || ""} |`,
     `| Started | ${log.started_at || "—"} |`,
+    `| Run state | ${runStateOf(log)} |`,
     `| Duration | ${log.duration_ms != null ? `${log.duration_ms} ms` : "—"} |`,
     `| CLI | ${log.cli_version || "—"} |`,
     `| Schema | ${log.schema_version ?? 1} |`,

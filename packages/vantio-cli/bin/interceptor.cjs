@@ -35,7 +35,13 @@ const {
   humanStatus,
   rollupCalls,
 } = require("./optics-cx.cjs");
-const { formatLiveAlert, noteLiveCall, programLabelFromArgv } = require("./optics-features.cjs");
+const {
+  formatLiveAlert,
+  noteLiveCall,
+  programLabelFromArgv,
+  runRecordIntervalMs,
+  writeRunFileAtomic,
+} = require("./optics-features.cjs");
 
 const USE_COLOR = process.stderr.isTTY === true;
 const c = {
@@ -231,8 +237,18 @@ _calls.push = function vantioRecordCall(...items) {
   }
   const last = items.length ? items[items.length - 1] : null;
   if (last && typeof last === "object" && !last[LIVE_NOTED]) announceLiveDestination(last);
+  try {
+    const host = last && typeof last === "object" ? last.hostname : undefined;
+    if (host && !_runHostsSeen.has(host)) {
+      _runHostsSeen.add(host);
+      noteRunRecordChange();
+    }
+  } catch {
+    // The running record must never affect the agent.
+  }
   return result;
 };
+const _runHostsSeen = new Set();
 const _startMs = Date.now();
 
 if (typeof globalThis.fetch !== "function") {
@@ -2029,23 +2045,16 @@ globalThis.fetch = function vantioFetch(input, init) {
   cp.__vantioCurlPatched = true;
 })();
 
-process.on("exit", () => {
-  // `vantio run --summary` sets VANTIO_SUMMARY=1. Recorded calls already print
-  // this local summary. The flag does not hide it and does not invent one
-  // when the run recorded nothing.
-  const summaryRequested = process.env.VANTIO_SUMMARY === "1";
-  const hosts      = [...new Set(_calls.map((x) => x.hostname))];
+// Writes ~/.vantio/runs/<trace>.json. While the program runs, `running` is true
+// and the record carries run_state "running" (see runStateOf in
+// optics-features.cjs). The write is a temp file plus rename, so a reader never
+// sees half a record. No request bodies or header values are stored.
+function writeRunLogFile(running) {
   const now        = Date.now();
+  const hosts      = [...new Set(_calls.map((x) => x.hostname))];
   const totalBytes = _calls.reduce((a, x) => a + (x.bytes || 0), 0);
-
-  // NOTE: anonymous Lane 1 usage telemetry is NOT sent here. A fetch scheduled
-  // inside a process "exit" handler never flushes (the event loop is already
-  // draining), so the ping is emitted once after the first completed in-scope
-  // call is recorded. This handler only prints the local summary.
-
-  // ── Write a local run log for `vantio prove` / `vantio discover --local` ──
-  // Always written on every vantio run, regardless of call count, tier, or
-  // SUMMARY flag. Non-fatal — run log write must never crash the agent exit.
+  // Written at exit on every vantio run, regardless of call count, tier, or
+  // SUMMARY flag. Non-fatal: a log write must never crash the agent.
   try {
     const vantioHome = process.env.VANTIO_HOME || join(homedir(), ".vantio");
     const runsDir = join(vantioHome, "runs");
@@ -2083,6 +2092,7 @@ process.on("exit", () => {
       duration_ms: now - _startMs,
       cli_version: CLI_VERSION,
       free_mode:   true,
+      ...(running ? { run_state: "running", update_interval_ms: RUN_INTERVAL_MS } : {}),
       calls: _calls.map((call) => ({
         hostname:      call.hostname,
         provider:      call.provider || guessProvider(call.hostname),
@@ -2120,10 +2130,72 @@ process.on("exit", () => {
     };
     const safeid   = RUN_TRACE_ID.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 80);
     const logPath  = join(runsDir, `${safeid}.json`);
-    writeFileSync(logPath, JSON.stringify(log, null, 2) + "\n", { mode: 0o600 });
+    writeRunFileAtomic(logPath, log, running ? undefined : { finalRecord: true });
+    lastRunWriteMs = Date.now();
   } catch {
-    // Non-fatal — never let log writing affect the exiting agent.
+    // Non-fatal — never let log writing affect the agent.
   }
+}
+
+// Running record. One writer per run: the first process that loads this hook
+// owns it and marks the environment, so a child process that inherits the hook
+// does not overwrite the parent's record. Worker threads do not write it.
+const RUN_INTERVAL_MS = runRecordIntervalMs();
+let lastRunWriteMs = 0;
+const ownsRunRecord = (() => {
+  try {
+    if (!require("node:worker_threads").isMainThread) return false;
+  } catch { /* no worker_threads: treat as main */ }
+  const owner = process.env.VANTIO_RUN_RECORD_OWNER_PID;
+  if (owner && owner !== String(process.pid)) return false;
+  process.env.VANTIO_RUN_RECORD_OWNER_PID = String(process.pid);
+  return true;
+})();
+
+let runFlushTimer = null;
+function noteRunRecordChange() {
+  if (!ownsRunRecord || RUN_INTERVAL_MS <= 0) return;
+  // A new destination is written at once, at most 4 times a second. When the
+  // last write was under 250 ms ago, one write is held back until 250 ms pass.
+  const wait = 250 - (Date.now() - lastRunWriteMs);
+  if (wait <= 0) {
+    writeRunLogFile(true);
+    return;
+  }
+  if (runFlushTimer) return;
+  runFlushTimer = setTimeout(() => {
+    runFlushTimer = null;
+    writeRunLogFile(true);
+  }, wait);
+  if (runFlushTimer.unref) runFlushTimer.unref();
+}
+
+if (ownsRunRecord && RUN_INTERVAL_MS > 0) {
+  const runRecordTimer = setInterval(() => {
+    writeRunLogFile(true);
+  }, RUN_INTERVAL_MS);
+  if (runRecordTimer.unref) runRecordTimer.unref();
+  // A record exists from the start, so a service that has made no call yet is listed.
+  writeRunLogFile(true);
+}
+
+
+process.on("exit", () => {
+  // `vantio run --summary` sets VANTIO_SUMMARY=1. Recorded calls already print
+  // this local summary. The flag does not hide it and does not invent one
+  // when the run recorded nothing.
+  const summaryRequested = process.env.VANTIO_SUMMARY === "1";
+  const hosts      = [...new Set(_calls.map((x) => x.hostname))];
+  const now        = Date.now();
+  const totalBytes = _calls.reduce((a, x) => a + (x.bytes || 0), 0);
+
+  // NOTE: anonymous Lane 1 usage telemetry is NOT sent here. A fetch scheduled
+  // inside a process "exit" handler never flushes (the event loop is already
+  // draining), so the ping is emitted once after the first completed in-scope
+  // call is recorded. This handler only prints the local summary.
+
+  // The final record replaces the running one. It has no run_state.
+  writeRunLogFile(false);
 
   if (_calls.length === 0) {
     if (summaryRequested) {

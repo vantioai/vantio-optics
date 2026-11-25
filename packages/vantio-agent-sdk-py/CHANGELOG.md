@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+Source changes only. This heading does not change the version in `pyproject.toml`, upload a wheel or sdist, or create a tag.
+
+- Under `vantio run python ...`, the package keeps `~/.vantio/runs/<trace>.json` up to date while the program runs. The record carries `run_state` `running` and `update_interval_ms`. It is rewritten every 5 seconds and when a new destination is seen. `VANTIO_RUN_RECORD_INTERVAL_MS` changes the interval (minimum 1000; `0` or `off` writes only the final record). The final record replaces it and has no `run_state`. Both writes use a temp file and a rename.
+- A `urllib.request.Request` subclass that overrides `get_method()` is recorded with the method it returns.
+
 ## 3.1.3
 
 Source version for the urllib method fix. This heading records the version in `pyproject.toml`. It does not upload a wheel or sdist and it does not create a tag.

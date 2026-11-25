@@ -55,3 +55,30 @@ test("list/load/prove/discover from fixture runs dir", () => {
 
   rmSync(root, { recursive: true, force: true });
 });
+
+test("run list marks running and unfinished runs; finished runs are unmarked", () => {
+  const root = mkdtempSync(join(tmpdir(), "vantio-optics-mcp-"));
+  const dir = join(root, "runs");
+  mkdirSync(dir, { recursive: true });
+  const base = (trace, extra) => ({
+    vantio_run_log: "1",
+    trace_id: trace,
+    started_at: new Date(Date.now() - 600000).toISOString(),
+    generated_at: new Date().toISOString(),
+    calls: [{ hostname: "api.openai.com", action: "OBSERVED", bytes: 1 }],
+    summary: { total_calls: 1, total_bytes: 1, hosts: ["api.openai.com"] },
+    ...extra,
+  });
+  const old = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  writeFileSync(join(dir, "fin.json"), JSON.stringify(base("fin", {})));
+  writeFileSync(join(dir, "run.json"), JSON.stringify(base("run", { run_state: "running", update_interval_ms: 5000 })));
+  writeFileSync(join(dir, "stale.json"), JSON.stringify(base("stale", { run_state: "running", update_interval_ms: 5000, generated_at: old })));
+  // A leftover temp file from a writer that was killed is not a run.
+  writeFileSync(join(dir, "run.json.123.1.tmp"), "{");
+
+  const states = Object.fromEntries(listRunLogs(dir).map((e) => [e.trace_id, e.run_state]));
+  assert.deepEqual(states, { fin: "finished", run: "running", stale: "unfinished" });
+  assert.match(proveMarkdown(loadRun("run", dir).log), /Run state \| running/);
+  assert.match(proveMarkdown(loadRun("stale", dir).log), /Run state \| unfinished/);
+  rmSync(root, { recursive: true, force: true });
+});

@@ -19,7 +19,7 @@ const {
   statSync,
   writeFileSync,
 } = require("node:fs");
-const { dirname, join } = require("node:path");
+const { basename, dirname, join } = require("node:path");
 const { request: httpRequest } = require("node:http");
 const { request: httpsRequest } = require("node:https");
 const dgram = require("node:dgram");
@@ -889,6 +889,7 @@ function buildCoverage(input) {
     not_covered: NOT_COVERED.map((row) => ({ id: row.id, summary: row.summary })).concat(input.procNote ? [input.procNote] : []),
     proc: input.proc || { readable: false },
     undated_excluded: input.undatedExcluded || 0,
+    run_records: input.runRecords || { running: 0, unfinished: 0 },
     counts: {
       processes: processes.length,
       connections: connections.length,
@@ -956,6 +957,11 @@ function formatCoverageText(coverage) {
   lines.push("Not covered");
   for (const row of coverage.not_covered) lines.push(`  ${row.summary}`);
   if (coverage.undated_excluded) lines.push(`Undated records outside this window: ${coverage.undated_excluded}`);
+  const records = coverage.run_records || {};
+  if (records.running) lines.push(`Run records still running: ${records.running}. Their calls so far are included.`);
+  if (records.unfinished) {
+    lines.push(`Run records unfinished: ${records.unfinished}. No recent update, so the program may have crashed or been killed. The last update is included.`);
+  }
   lines.push("");
   lines.push(`Processes seen: ${coverage.counts.processes}`);
   lines.push(`Connections seen: ${coverage.counts.connections}`);
@@ -1075,6 +1081,76 @@ function writeJsonAtomic(path, value) {
   const tmp = `${path}.tmp`;
   writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
   renameSync(tmp, path);
+}
+
+// ── running run records ──────────────────────────────────────────────────────
+// A long-lived program keeps a run record on disk while it runs. The record
+// carries run_state "running". The final record at exit has no run_state.
+// A reader that finds "running" checks generated_at against update_interval_ms.
+const RUN_RECORD_INTERVAL_DEFAULT_MS = 5000;
+const RUN_RECORD_INTERVAL_MIN_MS = 1000;
+const RUN_RECORD_INTERVAL_MAX_MS = 3600000;
+const RUN_RECORD_GRACE_MIN_MS = 15000;
+let runTmpSeq = 0;
+
+// VANTIO_RUN_RECORD_INTERVAL_MS: milliseconds between updates of the running
+// record. Values below 1000 are raised to 1000. "0" or "off" turns the
+// running record off. Anything unreadable falls back to the default.
+function runRecordIntervalMs(rawValue) {
+  const raw = rawValue === undefined ? process.env.VANTIO_RUN_RECORD_INTERVAL_MS : rawValue;
+  if (raw == null || String(raw).trim() === "") return RUN_RECORD_INTERVAL_DEFAULT_MS;
+  const text = String(raw).trim().toLowerCase();
+  if (text === "off" || text === "0") return 0;
+  if (!/^[0-9]+$/.test(text)) return RUN_RECORD_INTERVAL_DEFAULT_MS;
+  const value = Number(text);
+  return Math.min(RUN_RECORD_INTERVAL_MAX_MS, Math.max(RUN_RECORD_INTERVAL_MIN_MS, value));
+}
+
+// "finished": no run_state marker. "running": marked and updated recently.
+// "unfinished": marked, but no update for 3 intervals (at least 15 seconds).
+// The program may have crashed or been killed. The last update is kept.
+function runStateOf(log, nowMs) {
+  if (!log || typeof log !== "object" || log.run_state !== "running") {
+    return { state: "finished", age_ms: null };
+  }
+  const interval = Number(log.update_interval_ms) > 0 ? Number(log.update_interval_ms) : RUN_RECORD_INTERVAL_DEFAULT_MS;
+  const grace = Math.max(RUN_RECORD_GRACE_MIN_MS, interval * 3);
+  const stamp = Date.parse(log.generated_at);
+  if (Number.isNaN(stamp)) return { state: "unfinished", age_ms: null };
+  const age = Math.max(0, (nowMs == null ? Date.now() : nowMs) - stamp);
+  return { state: age <= grace ? "running" : "unfinished", age_ms: age };
+}
+
+function describeRunState(info) {
+  if (!info || info.state === "finished") return "";
+  if (info.state === "running") return "still running";
+  const age = info.age_ms == null ? "an unknown time" : `${Math.round(info.age_ms / 1000)}s`;
+  return `unfinished, no update for ${age}; the program may have crashed or been killed`;
+}
+
+// Temp file, then rename. A reader sees the old file or the new file, never
+// half of one. By default the temp file sits next to the target and its name
+// does not end in .json. With { finalRecord: true } the temp file is
+// runs/.tmp/<pid>-<n>-<name>.json: a path inside the runs directory that ends
+// in .json, so a hook on fs.writeFileSync that watches run records still sees
+// the write. Readers list runs/ without descending into .tmp.
+function writeRunFileAtomic(path, value, options) {
+  const dir = dirname(path);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  runTmpSeq += 1;
+  let tmp = `${path}.${process.pid}.${runTmpSeq}.tmp`;
+  if (options && options.finalRecord) {
+    const holder = join(dir, ".tmp");
+    mkdirSync(holder, { recursive: true, mode: 0o700 });
+    tmp = join(holder, `${process.pid}-${runTmpSeq}-${basename(path)}`);
+  }
+  try {
+    writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+    renameSync(tmp, path);
+  } catch (err) {
+    try { rmSync(tmp, { force: true }); } catch { /* temp already gone */ }
+    throw err;
+  }
 }
 
 function otelHex(seed, width) {
@@ -1566,6 +1642,12 @@ function loadBundle(since, explicitAllowlist, now) {
   const mcp = listMcpRecords(roots);
   if (mcp.error) return { error: mcp.error };
   const localHost = osHostname();
+  const runRecords = { running: 0, unfinished: 0 };
+  for (const log of logs.logs) {
+    const state = runStateOf(log, now).state;
+    if (state === "running") runRecords.running += 1;
+    else if (state === "unfinished") runRecords.unfinished += 1;
+  }
   const all = collectObservations(logs.logs, mcp.records, localHost, null);
   const collected = window.cutoff == null
     ? all
@@ -1576,6 +1658,7 @@ function loadBundle(since, explicitAllowlist, now) {
     observations: collected.observations,
     allObservations: all.observations,
     undatedExcluded: collected.undatedExcluded,
+    runRecords,
     cutoff: window.cutoff,
     localHost,
     platform: osPlatform(),
@@ -1611,6 +1694,7 @@ function coverageCommand(args) {
     machineId: bundle.machineId,
     since: bundle.since,
     undatedExcluded: bundle.undatedExcluded,
+    runRecords: bundle.runRecords,
     procGaps: proc.processes,
     proc: { readable: proc.readable },
     procNote: proc.readable ? null : { id: "proc_unreadable", summary: proc.reason },
@@ -1891,7 +1975,22 @@ function recordWrappedRun(input) {
     }),
     socket_observation: "read_only_proc",
   });
-  writeJsonAtomic(path, log);
+  const wasRunning = Boolean(existing && existing.run_state === "running");
+  if (input.running) {
+    log.run_state = "running";
+    log.update_interval_ms = Number.isInteger(input.updateIntervalMs) ? input.updateIntervalMs : RUN_RECORD_INTERVAL_DEFAULT_MS;
+  } else {
+    // The program is over. This record replaces a running one if there was one.
+    delete log.run_state;
+    delete log.update_interval_ms;
+    const started = Date.parse(log.started_at);
+    if (wasRunning && !Number.isNaN(started)) log.duration_ms = Math.max(0, Date.parse(stamp) - started);
+    if (Object.prototype.hasOwnProperty.call(input, "exitCode") || input.signal) {
+      log.exit_code = Number.isInteger(input.exitCode) ? input.exitCode : null;
+      log.exit_signal = input.signal || null;
+    }
+  }
+  writeRunFileAtomic(path, log);
   return { path, log };
 }
 
@@ -2316,7 +2415,12 @@ module.exports = {
   publicExportEvent,
   procGapsForCoverage,
   recordWrappedRun,
+  RUN_RECORD_INTERVAL_DEFAULT_MS,
+  describeRunState,
+  runRecordIntervalMs,
+  runStateOf,
   stepFollowExport,
+  writeRunFileAtomic,
   validateWebhookToken,
   watchLiveJournal,
 };
