@@ -736,7 +736,9 @@ def _urllib_method(url: Any, data: Any) -> str:
     return "POST" if data is not None else "GET"
 
 
-def _observe_urlopen(url, data=None, timeout=None, *args, **kwargs):
+def _observe_urlopen(url, data=None, timeout=socket._GLOBAL_DEFAULT_TIMEOUT, *args, **kwargs):
+    # The default must be the stdlib's sentinel, not None: None means "no
+    # timeout" and would override socket.setdefaulttimeout (VAN-384).
     hostname, port, path = _host_port_from_url(url)
     try:
         raw_url = url
@@ -914,6 +916,20 @@ def _uninstall_requests() -> None:
     _orig_requests_send = None
 
 
+def _httpx_body(request: Any) -> Any:
+    """Return the request body when httpx has it in memory, else None.
+
+    `Request.content` raises `httpx.RequestNotRead` for a streaming body (a
+    generator, an async iterator, or a multipart upload with a file). The body
+    is only used for its length here, so a streaming body counts as unknown
+    length instead of failing the user's call (VAN-384).
+    """
+    try:
+        return request.content
+    except Exception:
+        return None
+
+
 def _install_httpx() -> None:
     global _orig_httpx_sync_send, _orig_httpx_async_send
     if _httpx is None:
@@ -923,7 +939,7 @@ def _install_httpx() -> None:
 
     def _observe_sync(self, request, **kwargs):  # type: ignore[no-untyped-def]
         hostname, port, path = _host_port_from_url(getattr(request, "url", ""))
-        body = getattr(request, "content", None)
+        body = _httpx_body(request)
         kind, payload, redactions, record_send = _dispatch_gate(
             hostname, port, path, body, "python_httpx"
         )
@@ -964,7 +980,7 @@ def _install_httpx() -> None:
 
     async def _observe_async(self, request, **kwargs):  # type: ignore[no-untyped-def]
         hostname, port, path = _host_port_from_url(getattr(request, "url", ""))
-        body = getattr(request, "content", None)
+        body = _httpx_body(request)
         kind, payload, redactions, record_send = _dispatch_gate(
             hostname, port, path, body, "python_httpx"
         )
