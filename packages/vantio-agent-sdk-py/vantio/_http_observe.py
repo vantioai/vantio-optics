@@ -23,8 +23,10 @@ from __future__ import annotations
 
 import asyncio
 import http.client
+import io
 import json
 import os
+import re
 import shlex
 import socket
 import shutil
@@ -662,7 +664,7 @@ def _rollup_status(calls: list[dict[str, Any]]) -> tuple[str, str]:
 
 
 def _record(
-    hostname: str,
+    hostname: Optional[str],
     action: str,
     mediation: str,
     **extra: Any,
@@ -1676,8 +1678,85 @@ def _bytes_from_curl_form_value(value: Any, treat_at_as_file: bool, stdin_size: 
     return len(rhs.encode("utf-8"))
 
 
-def _urls_from_list_file(path: str, stdin_size: int = 0, kwargs: Optional[dict[str, Any]] = None) -> list[str]:
-    cap = 65536
+# Limits on what is read to find a URL (VAN-394). A curl -K config is read up
+# to 1 MiB and a wget -i list up to 64 KiB (the list cap is as on main).
+_CLI_CONFIG_CAP = 1024 * 1024
+_CLI_LIST_CAP = 64 * 1024
+
+_PER_PROCESS_PATH = re.compile(
+    r"^/dev/(?:stdin|stdout|stderr|fd/\d+)$|^/proc/(?:self|thread-self)/fd/\d+$"
+)
+
+
+def _is_special_file(mode: int) -> bool:
+    return stat.S_ISFIFO(mode) or stat.S_ISSOCK(mode) or stat.S_ISCHR(mode) or stat.S_ISBLK(mode)
+
+
+def _read_regular_file(path: str, cap: int, skipped: Optional[list[str]] = None) -> Optional[bytes]:
+    """Read up to cap bytes of a regular file, or return None.
+
+    The child curl or wget reads this file after we do, so only a regular file
+    is opened (VAN-394). Stat comes first: opening a FIFO, even non-blocking,
+    lets a waiting writer through and the close then breaks its pipe. The open
+    is still non-blocking and checked again with fstat, in case the path
+    changed after the stat; then it is closed without a read.
+
+    A FIFO, device or socket is added to ``skipped``. So is a regular file
+    larger than the cap: the part that was not read could hold a URL. For such
+    a file the last line that the cap cut is dropped.
+    /dev/stdin, /dev/fd/N and /proc/self/fd/N name the child's descriptors
+    once it runs; here they would name ours, so they are never opened.
+    """
+
+    def skip() -> None:
+        if skipped is not None:
+            skipped.append(path)
+        return None
+
+    if _PER_PROCESS_PATH.match(path):
+        return skip()
+    before = os.stat(path).st_mode
+    if not stat.S_ISREG(before):
+        return skip() if _is_special_file(before) else None
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOCTTY", 0)
+    fd = os.open(path, flags)
+    try:
+        opened = os.fstat(fd)
+        mode = opened.st_mode
+        if not stat.S_ISREG(mode):
+            return skip() if _is_special_file(mode) else None
+        # The size that stat reports is not trusted (procfs and sysfs report 0
+        # for a file that has content): read to the end, up to cap + 1 bytes.
+        chunks: list[bytes] = []
+        left = cap + 1
+        while left > 0:
+            chunk = os.read(fd, left)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            left -= len(chunk)
+        data = b"".join(chunks)
+        if len(data) <= cap:
+            return data
+        # Over the cap: the last line that the cap cut is dropped, so no
+        # partial URL is parsed.
+        if skipped is not None:
+            skipped.append(path)
+        if data[cap : cap + 1] == b"\n":
+            return data[:cap]
+        nl = data.rfind(b"\n", 0, cap)
+        return b"" if nl < 0 else data[: nl + 1]
+    finally:
+        os.close(fd)
+
+
+def _urls_from_list_file(
+    path: str,
+    stdin_size: int = 0,
+    kwargs: Optional[dict[str, Any]] = None,
+    skipped: Optional[list[str]] = None,
+) -> list[str]:
+    cap = _CLI_LIST_CAP
     max_urls = 32
     text = ""
     kwargs = kwargs or {}
@@ -1703,12 +1782,10 @@ def _urls_from_list_file(path: str, stdin_size: int = 0, kwargs: Optional[dict[s
                 raw = os.pread(fd, min(int(stdin_size) or 0, cap), 0)
                 text = raw.decode("utf-8", "replace")
         else:
-            fd = os.open(str(path), os.O_RDONLY)
-            try:
-                raw = os.read(fd, cap)
-                text = raw.decode("utf-8", "replace")
-            finally:
-                os.close(fd)
+            raw = _read_regular_file(str(path), cap, skipped)
+            if raw is None:
+                return []
+            text = raw.decode("utf-8", "replace")
     except Exception:
         return []
     urls: list[str] = []
@@ -1735,9 +1812,13 @@ _CURL_DATA_AT_FILE = {
 }
 
 
-def _url_from_curl_config(path: str) -> Optional[str]:
+def _url_from_curl_config(path: str, skipped: Optional[list[str]] = None) -> Optional[str]:
     try:
-        with open(path, encoding="utf-8", errors="replace") as fh:
+        raw = _read_regular_file(str(path), _CLI_CONFIG_CAP, skipped)
+        if raw is None:
+            return None
+        # Same line splitting as open(path, encoding="utf-8", errors="replace").
+        with io.TextIOWrapper(io.BytesIO(raw), encoding="utf-8", errors="replace") as fh:
             for line in fh:
                 s = line.strip()
                 if not s or s.startswith("#"):
@@ -1756,7 +1837,9 @@ def _url_from_curl_config(path: str) -> Optional[str]:
     return None
 
 
-def _parse_curl_argv(argv: list[str], stdin_size: int = 0) -> tuple[list[str], int]:
+def _parse_curl_argv(
+    argv: list[str], stdin_size: int = 0, skipped: Optional[list[str]] = None
+) -> tuple[list[str], int]:
     url: Optional[str] = None
     data_bytes = 0
     config_paths: list[str] = []
@@ -1836,7 +1919,7 @@ def _parse_curl_argv(argv: list[str], stdin_size: int = 0) -> tuple[list[str], i
         i += 1
     if url is None:
         for path in config_paths:
-            found = _url_from_curl_config(path)
+            found = _url_from_curl_config(path, skipped)
             if found:
                 url = found
                 break
@@ -1851,7 +1934,12 @@ def _take_input_file_arg(args: list[str], i: int, a: str) -> Optional[tuple[str,
     return None
 
 
-def _parse_wget_argv(argv: list[str], stdin_size: int = 0, kwargs: Optional[dict[str, Any]] = None) -> tuple[list[str], int]:
+def _parse_wget_argv(
+    argv: list[str],
+    stdin_size: int = 0,
+    kwargs: Optional[dict[str, Any]] = None,
+    skipped: Optional[list[str]] = None,
+) -> tuple[list[str], int]:
     url: Optional[str] = None
     data_bytes = 0
     list_paths: list[str] = []
@@ -1898,13 +1986,18 @@ def _parse_wget_argv(argv: list[str], stdin_size: int = 0, kwargs: Optional[dict
     if url:
         urls.append(url)
     for path in list_paths:
-        for found in _urls_from_list_file(path, stdin_size, kwargs):
+        for found in _urls_from_list_file(path, stdin_size, kwargs, skipped):
             if found not in urls:
                 urls.append(found)
     return urls, data_bytes
 
 
-def _parse_url_only_argv(argv: list[str], stdin_size: int = 0, kwargs: Optional[dict[str, Any]] = None) -> tuple[list[str], int]:
+def _parse_url_only_argv(
+    argv: list[str],
+    stdin_size: int = 0,
+    kwargs: Optional[dict[str, Any]] = None,
+    skipped: Optional[list[str]] = None,
+) -> tuple[list[str], int]:
     urls: list[str] = []
     list_paths: list[str] = []
     args = [str(a) for a in argv]
@@ -1922,19 +2015,24 @@ def _parse_url_only_argv(argv: list[str], stdin_size: int = 0, kwargs: Optional[
             urls.append(a)
         i += 1
     for path in list_paths:
-        for found in _urls_from_list_file(path, stdin_size, kwargs):
+        for found in _urls_from_list_file(path, stdin_size, kwargs, skipped):
             if found not in urls:
                 urls.append(found)
     return urls, 0
 
 
-def _parse_cli_argv(tool: str, argv: list[str], kwargs: Optional[dict[str, Any]] = None) -> tuple[list[str], int]:
+def _parse_cli_argv(
+    tool: str,
+    argv: list[str],
+    kwargs: Optional[dict[str, Any]] = None,
+    skipped: Optional[list[str]] = None,
+) -> tuple[list[str], int]:
     stdin_size = _stdin_byte_length(kwargs)
     if tool == "wget":
-        return _parse_wget_argv(argv, stdin_size, kwargs)
+        return _parse_wget_argv(argv, stdin_size, kwargs, skipped)
     if tool in ("httpie", "aria2c"):
-        return _parse_url_only_argv(argv, stdin_size, kwargs)
-    return _parse_curl_argv(argv, stdin_size)
+        return _parse_url_only_argv(argv, stdin_size, kwargs, skipped)
+    return _parse_curl_argv(argv, stdin_size, skipped)
 
 
 def _cli_mediation(tool: str) -> str:
@@ -1952,8 +2050,9 @@ def _apply_cli_gate(
 ) -> None:
     """Record in-scope CLI HTTP tools. Optics does not block or rewrite argv."""
     global _spent_usd
-    urls, data_bytes = _parse_cli_argv(tool, argv, kwargs)
-    if not urls:
+    skipped: list[str] = []
+    urls, data_bytes = _parse_cli_argv(tool, argv, kwargs, skipped)
+    if not urls and not skipped:
         return
     mediation = _cli_mediation(tool)
     for url in urls:
@@ -1968,6 +2067,13 @@ def _apply_cli_gate(
             bytes_observed=data_bytes,
         )
         _spent_usd += (data_bytes or 0) * _USD_PER_BYTE
+    # Main would have read a -K or -i file to find the URL, and it could not
+    # be read in full: a FIFO, device or socket that the child alone may read,
+    # or a file over the cap (VAN-394). That file could hold a watched URL, so
+    # the call is recorded with no host. It adds no spend, and the run summary
+    # leaves it out of the call count.
+    if not urls and skipped:
+        _record(None, "OBSERVED", mediation, path=None, bytes_observed=data_bytes)
 
 
 class _VantioPopen(subprocess.Popen):
@@ -2157,6 +2263,16 @@ def _program_label(argv: Optional[list[str]] = None) -> str:
     return "python"
 
 
+def _counted_calls(calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The one rule for what counts (owner decision, option A, VAN-394).
+
+    A call with no known host stays in `calls`, but it is left out of the
+    call count, the host list and the run status. This is the same rule as
+    countedCalls in the CLI's optics-cx.cjs.
+    """
+    return [c for c in calls if c and c.get("hostname")]
+
+
 def _write_run_log() -> None:
     if not _calls or not _trace_id:
         return
@@ -2165,10 +2281,14 @@ def _write_run_log() -> None:
         runs = os.path.join(home, "runs")
         os.makedirs(runs, mode=0o700, exist_ok=True)
         now = datetime.now(timezone.utc)
-        hosts = sorted({c.get("hostname") or "unknown" for c in _calls})
+        # Owner decision, option A (VAN-394): a call with no known host stays
+        # in `calls`, but it is left out of the call count. It is shown as its
+        # own count instead.
+        counted = _counted_calls(_calls)
+        hosts = sorted({c["hostname"] for c in counted})
         mediations = sorted({c.get("mediation") or "python_urllib" for c in _calls})
-        optics_status, application_status = _rollup_status(_calls)
-        customer = summarize_customer_fields(_calls, application_status)
+        optics_status, application_status = _rollup_status(counted)
+        customer = summarize_customer_fields(counted, application_status)
         payload = {
             "vantio_run_log": "1",
             "schema_version": 2,
@@ -2191,7 +2311,8 @@ def _write_run_log() -> None:
             "generated_at": now.isoformat(),
             "calls": list(_calls),
             "summary": {
-                "total_calls": len(_calls),
+                "total_calls": len(counted),
+                "calls_without_host": len(_calls) - len(counted),
                 "hosts": hosts,
                 "opticsStatus": optics_status,
                 "applicationStatus": application_status,

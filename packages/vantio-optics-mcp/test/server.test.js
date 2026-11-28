@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createOpticsMcpServer } from "../src/server.js";
 
 // Helpers
@@ -50,4 +53,32 @@ test("optics_upgrade_path response body ladder is Optics → Phantom Engine → 
   assert.equal(body.next[0].brand, "Vantio Phantom Engine", "first step must be Vantio Phantom Engine");
   assert.match(body.next[1].brand, /Enterprise/, "second step must be Enterprise");
   assert.doesNotMatch(JSON.stringify(body.next), /\bGate\b/i, "ladder steps must not include Gate");
+});
+
+// VAN-394, owner decision option A: optics_discover_local carries the count of
+// calls with no known host, and leaves them out of the host rows.
+test("optics_discover_local reports calls_without_host and no row for a no-host call", async () => {
+  const home = mkdtempSync(join(tmpdir(), "vantio-optics-mcp-discover-"));
+  mkdirSync(join(home, "runs"));
+  writeFileSync(join(home, "runs", "van394srv.json"), JSON.stringify({
+    vantio_run_log: "1",
+    trace_id: "van394srv",
+    calls: [
+      { hostname: null, action: "OBSERVED", bytes: 5000 },
+      { hostname: "llm.example.test", action: "OBSERVED", bytes: 300 },
+    ],
+    summary: { total_calls: 1, total_bytes: 300, calls_without_host: 1, hosts: ["llm.example.test"] },
+  }));
+  const before = process.env.VANTIO_HOME;
+  process.env.VANTIO_HOME = home;
+  try {
+    const body = await callTool(createOpticsMcpServer(), "optics_discover_local");
+    assert.equal(body.calls_without_host, 1);
+    assert.deepEqual(body.hosts.map((h) => [h.hostname, h.calls]), [["llm.example.test", 1]]);
+    assert.equal(body.host_count, 1);
+  } finally {
+    if (before === undefined) delete process.env.VANTIO_HOME;
+    else process.env.VANTIO_HOME = before;
+    rmSync(home, { recursive: true, force: true });
+  }
 });

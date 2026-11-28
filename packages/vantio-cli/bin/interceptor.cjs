@@ -32,6 +32,7 @@ const {
 const {
   SCHEMA_STATUS,
   applicationStatusFromHttp,
+  countedCalls,
   humanStatus,
   rollupCalls,
 } = require("./optics-cx.cjs");
@@ -1608,8 +1609,71 @@ globalThis.fetch = function vantioFetch(input, init) {
     return Buffer.byteLength(rhs);
   }
 
-  function urlsFromListFile(path, stdinSize, options) {
-    const cap = 65536;
+  // Limits on what is read to find a URL (VAN-394). A curl -K config is read
+  // up to 1 MiB and a wget -i list up to 64 KiB (the list cap is as on main).
+  const CLI_CONFIG_CAP = 1024 * 1024;
+  const CLI_LIST_CAP = 64 * 1024;
+
+  // /dev/stdin, /dev/fd/N and /proc/self/fd/N name the child's descriptors
+  // once it runs. Here they would name ours, so they are never opened.
+  function isPerProcessPath(path) {
+    return /^\/dev\/(stdin|stdout|stderr|fd\/\d+)$/.test(path)
+      || /^\/proc\/(self|thread-self)\/fd\/\d+$/.test(path);
+  }
+
+  function isSpecialFile(st) {
+    return st.isFIFO() || st.isSocket() || st.isCharacterDevice() || st.isBlockDevice();
+  }
+
+  // The child curl or wget reads this file after we do, so only a regular file
+  // is opened (VAN-394). Stat comes first: opening a FIFO, even non-blocking,
+  // lets a waiting writer through and the close then breaks its pipe. The
+  // open is still non-blocking and checked again with fstat, in case the path
+  // changed after the stat; then it is closed without a read.
+  // Returns the bytes, or null. A FIFO, device or socket is added to `skipped`.
+  // So is a regular file larger than the cap: the part that was not read could
+  // hold a URL. The size that stat reports is not trusted (procfs and sysfs
+  // report 0 for a file that has content), so the file is read to its end, up
+  // to cap + 1 bytes. For a file over the cap, the last line that the cap cut
+  // is dropped, so no partial URL is parsed.
+  function readRegularFile(path, cap, skipped) {
+    const p = String(path || "");
+    const skip = () => {
+      if (Array.isArray(skipped)) skipped.push(p);
+      return null;
+    };
+    if (isPerProcessPath(p)) return skip();
+    const before = statSync(p);
+    if (!before.isFile()) return isSpecialFile(before) ? skip() : null;
+    const { constants } = require("node:fs");
+    const flags = constants.O_RDONLY | (constants.O_NONBLOCK || 0) | (constants.O_NOCTTY || 0);
+    const fd = openSync(p, flags);
+    try {
+      const st = fstatSync(fd);
+      if (!st.isFile()) return isSpecialFile(st) ? skip() : null;
+      const chunks = [];
+      let got = 0;
+      while (got <= cap) {
+        const want = Math.min(65536, cap + 1 - got);
+        const chunk = Buffer.alloc(want);
+        const n = readSync(fd, chunk, 0, want, null);
+        if (n <= 0) break;
+        chunks.push(chunk.slice(0, n));
+        got += n;
+      }
+      const all = Buffer.concat(chunks);
+      if (all.length <= cap) return all;
+      if (Array.isArray(skipped)) skipped.push(p);
+      if (all[cap] === 0x0a) return all.slice(0, cap);
+      const nl = all.lastIndexOf(0x0a, cap - 1);
+      return nl < 0 ? Buffer.alloc(0) : all.slice(0, nl + 1);
+    } finally {
+      closeSync(fd);
+    }
+  }
+
+  function urlsFromListFile(path, stdinSize, options, skipped) {
+    const cap = CLI_LIST_CAP;
     const maxUrls = 32;
     let text = "";
     try {
@@ -1634,16 +1698,9 @@ globalThis.fetch = function vantioFetch(input, init) {
           text = buf.slice(0, n).toString("utf8");
         }
       } else {
-        const st = statSync(path);
-        if (!st.isFile()) return [];
-        const fd = openSync(String(path), "r");
-        try {
-          const buf = Buffer.alloc(Math.min(Number(st.size) || 0, cap));
-          const n = readSync(fd, buf, 0, buf.length, 0);
-          text = buf.slice(0, n).toString("utf8");
-        } finally {
-          closeSync(fd);
-        }
+        const raw = readRegularFile(path, cap, skipped);
+        if (raw == null) return [];
+        text = raw.toString("utf8");
       }
     } catch {
       return [];
@@ -1669,9 +1726,11 @@ globalThis.fetch = function vantioFetch(input, init) {
     "--data-raw": false,
   };
 
-  function urlFromCurlConfig(path) {
+  function urlFromCurlConfig(path, skipped) {
     try {
-      const text = readFileSync(String(path || ""), "utf8");
+      const raw = readRegularFile(path, CLI_CONFIG_CAP, skipped);
+      if (raw == null) return null;
+      const text = raw.toString("utf8");
       for (const line of text.split(/\r?\n/)) {
         const s = line.trim();
         if (!s || s.startsWith("#")) continue;
@@ -1689,6 +1748,7 @@ globalThis.fetch = function vantioFetch(input, init) {
     let url = null;
     let dataBytes = 0;
     const configPaths = [];
+    const skipped = [];
     const args = Array.isArray(argv) ? argv : [];
     for (let i = 0; i < args.length; i++) {
       const a = String(args[i]);
@@ -1768,14 +1828,14 @@ globalThis.fetch = function vantioFetch(input, init) {
     }
     if (!url) {
       for (const p of configPaths) {
-        const fromCfg = urlFromCurlConfig(p);
+        const fromCfg = urlFromCurlConfig(p, skipped);
         if (fromCfg) {
           url = fromCfg;
           break;
         }
       }
     }
-    return { urls: url ? [url] : [], dataBytes };
+    return { urls: url ? [url] : [], dataBytes, skipped: skipped.length };
   }
 
   function takeInputFileArg(args, i, a) {
@@ -1831,13 +1891,14 @@ globalThis.fetch = function vantioFetch(input, init) {
       if (!url && /^https?:\/\//i.test(a)) url = a;
     }
     const urls = [];
+    const skipped = [];
     if (url) urls.push(url);
     for (const p of listPaths) {
-      for (const u of urlsFromListFile(p, stdinSize, options)) {
+      for (const u of urlsFromListFile(p, stdinSize, options, skipped)) {
         if (!urls.includes(u)) urls.push(u);
       }
     }
-    return { urls, dataBytes };
+    return { urls, dataBytes, skipped: skipped.length };
   }
 
   function parseUrlOnlyArgv(argv, stdinSize, options) {
@@ -1854,12 +1915,13 @@ globalThis.fetch = function vantioFetch(input, init) {
       }
       if (/^https?:\/\//i.test(a) && !urls.includes(a)) urls.push(a);
     }
+    const skipped = [];
     for (const p of listPaths) {
-      for (const u of urlsFromListFile(p, stdinSize, options)) {
+      for (const u of urlsFromListFile(p, stdinSize, options, skipped)) {
         if (!urls.includes(u)) urls.push(u);
       }
     }
-    return { urls, dataBytes: 0 };
+    return { urls, dataBytes: 0, skipped: skipped.length };
   }
 
   function parseCliArgv(tool, argv, options) {
@@ -1926,7 +1988,7 @@ globalThis.fetch = function vantioFetch(input, init) {
       mediation: meta.mediation, plane: "optics_gate",
       redactions: 0,
     });
-    log(`${c.cyan}[ ∅ VANTIO ]${c.reset} Optics status: ${humanStatus("SUCCESS")} — ${hostname} — ${meta.label}`);
+    log(`${c.cyan}[ ∅ VANTIO ]${c.reset} Optics status: ${humanStatus("SUCCESS")} — ${hostname || "host unknown"} — ${meta.label}`);
   }
 
   function applyCliGate(tool, argv, options) {
@@ -1938,6 +2000,12 @@ globalThis.fetch = function vantioFetch(input, init) {
       recordCli(tool, dest.hostname, dest.port, parsed.dataBytes);
       spentUsd += (parsed.dataBytes || 0) * USD_PER_BYTE;
     }
+    // Main would have read a -K or -i file to find the URL, and it could not
+    // be read in full: a FIFO, device or socket that the child alone may read,
+    // or a file over the cap (VAN-394). That file could hold a watched URL, so
+    // the call is recorded with no host. It adds no spend, and the run summary
+    // leaves it out of the call count and the byte totals.
+    if (urls.length === 0 && parsed.skipped > 0) recordCli(tool, null, null, parsed.dataBytes);
   }
 
   cp.spawn = function vantioSpawn(...args) {
@@ -2034,9 +2102,14 @@ process.on("exit", () => {
   // this local summary. The flag does not hide it and does not invent one
   // when the run recorded nothing.
   const summaryRequested = process.env.VANTIO_SUMMARY === "1";
-  const hosts      = [...new Set(_calls.map((x) => x.hostname))];
+  // Owner decision, option A (VAN-394): a call with no known host stays in
+  // `calls`, but it is left out of the call count and the byte totals. It is
+  // shown as its own count instead.
+  const counted    = countedCalls(_calls);
+  const noHost     = _calls.length - counted.length;
+  const hosts      = [...new Set(counted.map((x) => x.hostname))];
   const now        = Date.now();
-  const totalBytes = _calls.reduce((a, x) => a + (x.bytes || 0), 0);
+  const totalBytes = counted.reduce((a, x) => a + (x.bytes || 0), 0);
 
   // NOTE: anonymous Lane 1 usage telemetry is NOT sent here. A fetch scheduled
   // inside a process "exit" handler never flushes (the event loop is already
@@ -2050,12 +2123,12 @@ process.on("exit", () => {
     const vantioHome = process.env.VANTIO_HOME || join(homedir(), ".vantio");
     const runsDir = join(vantioHome, "runs");
     mkdirSync(runsDir, { recursive: true, mode: 0o700 });
-    const providers = [...new Set(_calls.map((x) => x.provider).filter(Boolean))];
-    const errors = _calls.filter((x) => x.error || x.ok === false).length;
+    const providers = [...new Set(counted.map((x) => x.provider).filter(Boolean))];
+    const errors = counted.filter((x) => x.error || x.ok === false).length;
     const by_host = {};
     const by_provider = {};
-    for (const call of _calls) {
-      const h = call.hostname || "unknown";
+    for (const call of counted) {
+      const h = call.hostname;
       const p = call.provider || "unknown";
       by_host[h] = by_host[h] || { calls: 0, bytes: 0, errors: 0 };
       by_host[h].calls += 1;
@@ -2103,8 +2176,9 @@ process.on("exit", () => {
         error_class:   call.error_class || null,
       })),
       summary: {
-        total_calls:   _calls.length,
+        total_calls:   counted.length,
         total_bytes:   totalBytes,
+        calls_without_host: noHost,
         hosts:         hosts,
         providers,
         errors,
@@ -2133,13 +2207,14 @@ process.on("exit", () => {
   }
 
   if (process.env.VANTIO_JSON === "1") {
-    const rollup = rollupCalls(_calls);
+    const rollup = rollupCalls(counted);
     process.stderr.write(JSON.stringify({
       schema_status: SCHEMA_STATUS,
       event: "run_summary",
       opticsStatus: rollup.opticsStatus,
       applicationStatus: rollup.applicationStatus,
-      calls: _calls.length,
+      calls: counted.length,
+      calls_without_host: noHost,
       hosts,
       total_bytes: totalBytes,
       duration_ms: now - _startMs,
@@ -2152,11 +2227,12 @@ process.on("exit", () => {
   const lines = [
     "",
     `${c.dim}[ ∅ VANTIO ]${c.reset} ${c.bold}Run Summary${c.reset}`,
-    `  LLM calls:    ${c.yellow}${_calls.length}${c.reset}`,
-    `  Hosts:        ${c.cyan}${hosts.join(", ")}${c.reset}`,
-    `  Total bytes:  ${totalBytes > 0 ? totalBytes.toLocaleString() : "unknown"}`,
+    `  LLM calls:    ${c.yellow}${counted.length}${c.reset}`,
+    `  Hosts:        ${c.cyan}${hosts.join(", ") || "none"}${c.reset}`,
+    `  Total bytes:  ${totalBytes > 0 ? totalBytes.toLocaleString() : (counted.length === 0 ? "0" : "unknown")}`,
     `  Duration:     ${durationS}s`,
   ];
+  if (noHost > 0) lines.push(`  Calls with no known host: ${noHost} (not counted above)`);
   lines.push(`  ${c.dim}→ Run \`vantio prove\` to export a local proof artifact from this run.${c.reset}`);
   lines.push("");
   process.stderr.write(lines.join("\n"));

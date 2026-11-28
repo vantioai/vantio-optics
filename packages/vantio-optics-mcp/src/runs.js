@@ -26,7 +26,7 @@ export function listRunLogs(dir = runsDir()) {
       const log = JSON.parse(raw);
       if (log?.vantio_run_log !== "1") continue;
       const st = statSync(path);
-      const calls = Array.isArray(log.calls) ? log.calls : [];
+      const calls = logCountedCalls(log);
       const summary = log.summary || {};
       entries.push({
         path,
@@ -50,6 +50,26 @@ export function listRunLogs(dir = runsDir()) {
 
   entries.sort((a, b) => (b.mtime_ms || 0) - (a.mtime_ms || 0));
   return entries;
+}
+
+// Owner decision, option A (VAN-394): a call with no known host is listed,
+// but it is left out of the call count and the byte totals. This package
+// does not depend on @vantio/cli, so this is a copy of countedCalls in the
+// CLI's optics-cx.cjs. A test in the CLI keeps the two in step.
+export function countedCalls(calls) {
+  return calls.filter((c) => c && c.hostname);
+}
+
+// A log written before option A has no `calls_without_host` in its summary.
+// It is read as main read it: every call counts, and no no-host count or line
+// is shown. Copies of hasNoHostField and logCountedCalls in optics-cx.cjs.
+export function hasNoHostField(log) {
+  return typeof log?.summary?.calls_without_host === "number";
+}
+
+export function logCountedCalls(log) {
+  const calls = Array.isArray(log?.calls) ? log.calls : [];
+  return hasNoHostField(log) ? countedCalls(calls) : calls;
 }
 
 export function loadRun(traceOrPrefix, dir = runsDir()) {
@@ -86,9 +106,12 @@ export function loadRun(traceOrPrefix, dir = runsDir()) {
 
 export function proveMarkdown(log) {
   const calls = Array.isArray(log.calls) ? log.calls : [];
+  const counted = logCountedCalls(log);
   const summary = log.summary || {};
-  const totalCalls = summary.total_calls ?? calls.length;
-  const totalBytes = summary.total_bytes ?? calls.reduce((a, c) => a + (c.bytes || 0), 0);
+  // For a log from before option A every call counts, so there is no note.
+  const noHost = calls.length - counted.length;
+  const totalCalls = summary.total_calls ?? counted.length;
+  const totalBytes = summary.total_bytes ?? counted.reduce((a, c) => a + (c.bytes || 0), 0);
   const hosts = Array.isArray(summary.hosts)
     ? summary.hosts
     : [...new Set(calls.map((c) => c.hostname).filter(Boolean))];
@@ -134,12 +157,13 @@ export function proveMarkdown(log) {
     `- Providers: ${providers.length ? providers.map((p) => `\`${p}\``).join(", ") : "—"}`,
     `- Errors / non-OK: **${summary.errors ?? 0}**`,
     "",
-    "## Calls",
+    `## Calls (${calls.length})`,
     "",
     "| # | Host | Provider | Method path | Status | Duration ms | Action | Bytes | Timestamp |",
     "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     rows || "| — | — | — | — | — | — | — | — | — |",
     "",
+    ...(noHost > 0 ? [`Calls with no known host: ${noHost} (listed above, not counted in the summary)`, ""] : []),
     "## Residual (honest)",
     "",
     "Optics fills your data log on the attach path. Ungoverned paths (curl, raw sockets, unwrapped processes) stay silent. Upgrade to **Vantio Phantom Engine** ($799/node/mo) for Observe, Enforce, and Control on enrolled Linux hosts. [Enterprise](https://vantio.ai/enterprise) adds governance for larger teams.",
@@ -152,6 +176,9 @@ export function proveMarkdown(log) {
 export function discoverLocal(sinceMs = 7 * 24 * 60 * 60 * 1000, dir = runsDir()) {
   const cutoff = Date.now() - sinceMs;
   const hostMap = new Map();
+  // A call with no known host gets no row. It is counted on its own, and the
+  // count is returned as `calls_without_host` on the list (VAN-394).
+  let noHostCalls = 0;
 
   for (const entry of listRunLogs(dir)) {
     if ((entry.mtime_ms || 0) < cutoff) continue;
@@ -162,7 +189,13 @@ export function discoverLocal(sinceMs = 7 * 24 * 60 * 60 * 1000, dir = runsDir()
       continue;
     }
     const calls = Array.isArray(log.calls) ? log.calls : [];
+    const optionA = hasNoHostField(log);
     for (const c of calls) {
+      if (!c || (!c.hostname && optionA)) {
+        noHostCalls += 1;
+        continue;
+      }
+      // A log from before option A: a call with no host is `unknown`, as before.
       const host = c.hostname || "unknown";
       const row = hostMap.get(host) || {
         hostname: host,
@@ -187,7 +220,9 @@ export function discoverLocal(sinceMs = 7 * 24 * 60 * 60 * 1000, dir = runsDir()
     }
   }
 
-  return [...hostMap.values()].sort((a, b) => b.calls - a.calls);
+  const hosts = [...hostMap.values()].sort((a, b) => b.calls - a.calls);
+  hosts.calls_without_host = noHostCalls;
+  return hosts;
 }
 
 export const UPGRADE_PATH = {

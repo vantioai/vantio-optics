@@ -90,6 +90,29 @@ function displayCall(call) {
   };
 }
 
+// Owner decision, option A (VAN-394). The one rule for what counts: a call
+// with no known host stays in `calls`, but it is left out of the call count,
+// the byte totals, the host lists and the run status. Every writer and reader
+// of a run summary in this package uses this function.
+function countedCalls(calls) {
+  return (Array.isArray(calls) ? calls : []).filter((call) => call && call.hostname);
+}
+
+// A log written before option A has no `calls_without_host` in its summary.
+// Every reader reads such a log as main read it: every call counts, and no
+// no-host count or line is shown (VAN-394).
+function hasNoHostField(log) {
+  const summary = log && log.summary;
+  return !!summary && typeof summary.calls_without_host === "number";
+}
+
+// The calls of one run log that count. For a log from before option A that is
+// every call.
+function logCountedCalls(log) {
+  const calls = Array.isArray(log && log.calls) ? log.calls : [];
+  return hasNoHostField(log) ? countedCalls(calls) : calls;
+}
+
 function rollupCalls(calls) {
   const list = Array.isArray(calls) ? calls : [];
   if (list.length === 0) {
@@ -123,6 +146,9 @@ module.exports = {
   applicationStatusFromHttp,
   opticsStatusForRecordedCall,
   displayCall,
+  countedCalls,
+  hasNoHostField,
+  logCountedCalls,
   rollupCalls,
   telemetryPosture,
   withSchema,
