@@ -831,6 +831,8 @@ function findRunByPrefix(dir, prefix, cmd = "prove") {
     return { path: null, empty: true };
   }
   const norm = prefix.replace(/[^a-zA-Z0-9_-]/g, "_");
+  // A full trace id wins, even when it is also the start of a longer id.
+  if (files.includes(`${norm}.json`)) return { path: join(dir, `${norm}.json`), empty: false };
   const matches = files.filter((f) => f.includes(norm));
   if (matches.length === 0) return { path: null, empty: true };
   if (matches.length > 1) {
