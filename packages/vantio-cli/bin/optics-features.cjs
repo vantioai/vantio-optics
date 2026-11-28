@@ -1947,6 +1947,48 @@ function liveJournalPath() {
   return join(primaryHome(), "live.jsonl");
 }
 
+// The lock is held only while seen-destinations.json is rewritten, which takes
+// milliseconds. A lock older than this was left by a process that died while
+// holding it (SIGKILL, OOM), and is taken over (VAN-386).
+const SEEN_LOCK_STALE_MS = 10000;
+
+function pauseSync(ms) {
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  } catch {
+    /* no Atomics: fall back to retrying at once */
+  }
+}
+
+function takeStaleLock(lock) {
+  let mtime;
+  try {
+    mtime = statSync(lock).mtimeMs;
+  } catch {
+    return true; // gone already: try mkdir again
+  }
+  if (Date.now() - mtime <= SEEN_LOCK_STALE_MS) return false;
+  // Move it aside first, so two processes cannot both delete and recreate it.
+  const aside = `${lock}.stale-${process.pid}-${Date.now()}`;
+  try {
+    renameSync(lock, aside);
+  } catch {
+    return true; // another process moved it first
+  }
+  try {
+    // Between our stat and our rename, another process may have taken over
+    // and made a fresh lock. If what we moved is fresh, put it back.
+    if (Date.now() - statSync(aside).mtimeMs <= SEEN_LOCK_STALE_MS) {
+      try { renameSync(aside, lock); } catch { /* it re-created one; ours is extra */ }
+      return false;
+    }
+  } catch {
+    return true;
+  }
+  try { rmSync(aside, { recursive: true, force: true }); } catch { /* best effort */ }
+  return true;
+}
+
 function withSeenLock(fn) {
   const lock = join(primaryHome(), "seen.lock");
   mkdirSync(primaryHome(), { recursive: true, mode: 0o700 });
@@ -1957,7 +1999,9 @@ function withSeenLock(fn) {
       break;
     } catch (err) {
       if (!err || err.code !== "EEXIST") throw err;
+      if (takeStaleLock(lock)) continue;
       if (Date.now() - started > 2000) throw new Error("seen destination file is busy");
+      pauseSync(5);
     }
   }
   try {

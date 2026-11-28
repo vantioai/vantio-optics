@@ -143,6 +143,19 @@ function observeResponse(runtime, policy, writeLog, input, response) {
     if (!response || typeof response.clone !== "function" || !response.headers || typeof response.headers.get !== "function") return;
     const type = String(response.headers.get("content-type") || "");
     if (!type.includes("application/json") && !type.includes("text/event-stream")) return;
+    // An event stream can stay open for the whole session. A clone tees the
+    // body, and a tee keeps the server stream alive until both branches end,
+    // so the caller's cancel() would never finish (VAN-386). Record a gap
+    // instead of reading it.
+    if (type.includes("text/event-stream")) {
+      writeLog(gapRecord(serverIdFromInput(input), "stream_not_inspected", "server_to_client", "http"));
+      return;
+    }
+    const declared = Number(response.headers.get("content-length"));
+    if (Number.isFinite(declared) && declared > MAX_FRAME) {
+      writeLog(gapRecord(serverIdFromInput(input), "oversize", "server_to_client", "http"));
+      return;
+    }
     const clone = response.clone();
     if (!clone || typeof clone.arrayBuffer !== "function") return;
     clone.arrayBuffer().then((bytes) => {
@@ -155,7 +168,7 @@ function observeResponse(runtime, policy, writeLog, input, response) {
         policy,
         serverId: serverIdFromInput(input),
         responseBody: buf,
-        responseType: type.includes("text/event-stream") ? "text/event-stream" : "application/json",
+        responseType: "application/json",
       });
       const records = out && Array.isArray(out.records) ? out.records : [];
       for (const record of records) writeLog(record);
