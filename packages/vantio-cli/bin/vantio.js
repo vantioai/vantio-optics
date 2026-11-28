@@ -874,6 +874,9 @@ function findMostRecentRun(dir) {
       let t = 0;
       try {
         const log = JSON.parse(readFileSync(p, "utf8"));
+        // A JSON file that is not a run log is never the latest run (VAN-415).
+        // prove --list, search, discover and coverage skip it too.
+        if (log?.vantio_run_log !== "1") continue;
         if (log?.generated_at) t = new Date(log.generated_at).getTime();
         else if (log?.started_at) t = new Date(log.started_at).getTime();
       } catch { /* fall through to mtime */ }
@@ -938,6 +941,12 @@ async function proveCommand(args) {
   const log = loaded.json;
   if (!log || typeof log !== "object" || Array.isArray(log)) {
     process.stderr.write(`vantio prove: could not read log: not a JSON object\n`);
+    process.exit(1);
+  }
+  // A file picked from the runs folder must be a run log, as for tail,
+  // search and diff (VAN-415). An explicit --from file is read as before.
+  if (!values.from && log.vantio_run_log !== "1") {
+    process.stderr.write(`vantio prove: not a Vantio run log: ${logPath}\n`);
     process.exit(1);
   }
 
