@@ -4,6 +4,7 @@
 
 const { existsSync, readdirSync, readFileSync, readlinkSync } = require("node:fs");
 const { join, basename } = require("node:path");
+const { isatty } = require("node:tty");
 
 const INTERPRETERS = new Set(["node", "nodejs", "python", "python3", "bun", "deno"]);
 const NAMED_AI = new Set(["ollama", "llama-server"]);
@@ -219,6 +220,38 @@ function parseStat(text) {
   return { comm: String(text).slice(open + 1, close), ppid };
 }
 
+// True when this process is in the foreground process group of its
+// controlling terminal, read from /proc/<pid>/stat (pgrp is field 5, tpgid
+// field 8). A Ctrl+C, Ctrl+\\ or hangup from that terminal goes to the whole
+// group, so a child in the same group already has the signal.
+function inTerminalForeground(statText) {
+  const close = String(statText || "").lastIndexOf(")");
+  if (close < 0) return false;
+  const rest = String(statText).slice(close + 1).trim().split(/\s+/);
+  const pgrp = Number(rest[2]);
+  const tpgid = Number(rest[5]);
+  return Number.isInteger(pgrp) && Number.isInteger(tpgid) && tpgid > 0 && tpgid === pgrp;
+}
+
+// Whether a SIGINT, SIGHUP or SIGQUIT that reached this process most likely
+// came from its terminal. Off Linux there is no /proc, so a terminal on any
+// standard stream counts as the terminal.
+function signalFromTerminal(options) {
+  const opts = options || {};
+  const procRoot = opts.procRoot || (process.platform === "linux" ? "/proc" : null);
+  if (procRoot) {
+    try {
+      return inTerminalForeground(readFileSync(join(procRoot, "self", "stat"), "utf8"));
+    } catch {
+      return false;
+    }
+  }
+  // isatty() on the descriptors, so no stdin stream is created in the wrapper.
+  return [0, 1, 2].some((fd) => {
+    try { return isatty(fd); } catch { return false; }
+  });
+}
+
 function readProcList(procRoot) {
   const out = [];
   let names = [];
@@ -356,9 +389,11 @@ module.exports = {
   commandLooksLikeAi,
   createWrapSampler,
   discoverUncovered,
+  inTerminalForeground,
   parseHosts,
   parseIpv4,
   parseStat,
   parseTcpTable,
   sampleWrappedTree,
+  signalFromTerminal,
 };
