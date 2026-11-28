@@ -554,7 +554,8 @@ function observationFromMcp(record, seq, localHost) {
     path: null,
     bytes: null,
     http_status: null,
-    time: null,
+    // Every MCP record carries the time it was written (VAN-408).
+    time: cleanToken(record && record.at, 64),
     mediation: null,
     provider: null,
     tool_name_retained: Boolean(tool),
@@ -652,7 +653,7 @@ function collectObservations(logs, mcpRecords, localHost, cutoff) {
     const observation = observationFromMcp(record, seq, localHost);
     seq += 1;
     if (!inWindow(observation.time, cutoff)) {
-      undatedExcluded += 1;
+      if (!observation.time) undatedExcluded += 1;
       continue;
     }
     observations.push(observation);
