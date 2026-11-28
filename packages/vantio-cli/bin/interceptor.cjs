@@ -1422,6 +1422,16 @@ globalThis.fetch = function vantioFetch(input, init) {
   const origExecFile = typeof cp.execFile === "function" ? cp.execFile.bind(cp) : null;
   const origExecFileSync = typeof cp.execFileSync === "function" ? cp.execFileSync.bind(cp) : null;
   const origExec = typeof cp.exec === "function" ? cp.exec.bind(cp) : null;
+  // exec and execFile carry util.promisify.custom so that promisify() resolves
+  // to { stdout, stderr }. The bound copies above do not have it (VAN-385).
+  const PROMISIFY_CUSTOM = Symbol.for("nodejs.util.promisify.custom");
+  const execPromisified = origExec && typeof cp.exec[PROMISIFY_CUSTOM] === "function" ? cp.exec[PROMISIFY_CUSTOM] : null;
+  const execFilePromisified =
+    origExecFile && typeof cp.execFile[PROMISIFY_CUSTOM] === "function" ? cp.execFile[PROMISIFY_CUSTOM] : null;
+  // Node's exec() runs `sh -c <command>` through the exported execFile(), so
+  // while exec observes its own command the execFile wrapper stays quiet;
+  // otherwise one exec of curl is recorded twice.
+  let execDepth = 0;
   const origExecSync = typeof cp.execSync === "function" ? cp.execSync.bind(cp) : null;
 
   function cmdBase(file) {
@@ -2034,18 +2044,54 @@ globalThis.fetch = function vantioFetch(input, init) {
     };
   }
 
+  function observeExecFile(args) {
+    if (execDepth > 0) return;
+    try {
+      const { command: file, argv, options } = splitSpawnArgs(args);
+      const cli = httpCliFromSpawn(file, argv, options);
+      if (cli) applyCliGate(cli.tool, cli.argv, options);
+    } catch {
+      /* observation must not stop the child */
+    }
+  }
+
+  function observeExec(args) {
+    try {
+      const command = args[0];
+      const cli = httpCliFromExec(command);
+      if (!cli) return;
+      const options = args[1] && typeof args[1] === "object" ? args[1] : null;
+      applyCliGate(cli.tool, cli.argv, options);
+    } catch {
+      /* observation must not stop the child */
+    }
+  }
+
+  function keepPromisify(wrapper, promisified, observe, nested) {
+    if (!promisified) return;
+    Object.defineProperty(wrapper, PROMISIFY_CUSTOM, {
+      configurable: true,
+      enumerable: false,
+      writable: false,
+      value: function vantioPromisified(...args) {
+        observe(args);
+        if (!nested) return promisified(...args);
+        execDepth += 1;
+        try {
+          return promisified(...args);
+        } finally {
+          execDepth -= 1;
+        }
+      },
+    });
+  }
+
   if (origExecFile) {
     cp.execFile = function vantioExecFile(...args) {
-      try {
-        const { command: file, argv, options } = splitSpawnArgs(args);
-        const cli = httpCliFromSpawn(file, argv, options);
-        if (!cli) return origExecFile(...args);
-        applyCliGate(cli.tool, cli.argv, options);
-        return origExecFile(...args);
-      } catch {
-        return origExecFile(...args);
-      }
+      observeExecFile(args);
+      return origExecFile(...args);
     };
+    keepPromisify(cp.execFile, execFilePromisified, observeExecFile, false);
   }
 
   if (origExecFileSync) {
@@ -2065,17 +2111,15 @@ globalThis.fetch = function vantioFetch(input, init) {
 
   if (origExec) {
     cp.exec = function vantioExec(...args) {
+      observeExec(args);
+      execDepth += 1;
       try {
-        const command = args[0];
-        const cli = httpCliFromExec(command);
-        if (!cli) return origExec(...args);
-        const options = args[1] && typeof args[1] === "object" ? args[1] : null;
-        applyCliGate(cli.tool, cli.argv, options);
         return origExec(...args);
-      } catch {
-        return origExec(...args);
+      } finally {
+        execDepth -= 1;
       }
     };
+    keepPromisify(cp.exec, execPromisified, observeExec, true);
   }
 
   if (origExecSync) {
