@@ -166,6 +166,12 @@ export function decideEnvelope({ policy, session, direction, envelope, hmacHex }
   let next = session;
   const server = policy && policy.servers ? policy.servers[session.serverId] : undefined;
 
+  if (envelope && envelope.reason === "duplicate_key") {
+    // Two keys a reader may take either way (method and Method, or a key given
+    // twice). Refused in enforce whatever the policy says.
+    findings.push(finding("duplicate_key"));
+    return finish(mode, posture(mode, true, false), findings, next, envelope, hmacHex, { reason: "duplicate_key" });
+  }
   if (!envelope || envelope.batch || envelope.malformed) {
     findings.push(finding(envelope && envelope.batch ? "batch_rejected" : "malformed_json"));
     return finish(mode, "GAP", findings, next, envelope, hmacHex, null);

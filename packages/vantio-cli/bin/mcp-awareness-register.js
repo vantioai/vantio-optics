@@ -250,13 +250,15 @@ function attachEnforceLines(runtime, writeLog, child, meta) {
         meta.pending = Buffer.concat([meta.pending, extra]);
       }
     }
-    let newline = meta.pending.indexOf(0x0a);
-    while (newline >= 0) {
-      const line = meta.pending.subarray(0, newline + 1);
-      meta.pending = Buffer.from(meta.pending.subarray(newline + 1));
-      decideLine(runtime, writeLog, child, meta, line, origWrite);
-      newline = meta.pending.indexOf(0x0a);
+    // Walk forward through pending; cut it once at the end.
+    let pos = 0;
+    let cut = lineEnd(meta.pending, 0);
+    while (cut > 0) {
+      decideLine(runtime, writeLog, child, meta, meta.pending.subarray(pos, cut), origWrite);
+      pos = cut;
+      cut = lineEnd(meta.pending, pos);
     }
+    meta.pending = pos > 0 ? Buffer.from(meta.pending.subarray(pos)) : meta.pending;
     if (final && meta.pending.length) {
       const tail = meta.pending;
       meta.pending = Buffer.alloc(0);
@@ -285,6 +287,22 @@ function attachEnforceLines(runtime, writeLog, child, meta) {
     if (done) done();
     return ended;
   };
+}
+
+// End offset of the line that starts at `from` in `pending`, or 0 when it is
+// not complete. A line ends at LF, at CRLF, or at a lone CR. A CR in the last
+// byte waits for the next chunk so that a CRLF is judged whole. The bytes keep
+// their CR and LF. One forward scan.
+function lineEnd(pending, from) {
+  for (let i = from; i < pending.length; i += 1) {
+    const b = pending[i];
+    if (b === 0x0a) return i + 1;
+    if (b === 0x0d) {
+      if (i + 1 >= pending.length) return 0;
+      return pending[i + 1] === 0x0a ? i + 2 : i + 1;
+    }
+  }
+  return 0;
 }
 
 function decideLine(runtime, writeLog, child, meta, line, origWrite) {

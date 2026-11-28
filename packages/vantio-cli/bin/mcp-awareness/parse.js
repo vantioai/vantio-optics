@@ -29,6 +29,27 @@ function fail() {
   return null;
 }
 
+// A lenient JSON reader (Go's encoding/json, for one) matches a field name in
+// any letter case. The long s (U+017F) is the one non-ASCII letter that folds
+// into a letter of these names. Keys are fold-checked here, stored or not, so
+// the key cap (a memory bound) cannot hide one.
+const FOLD_NAMES = new Set(["jsonrpc", "method", "id", "params", "result", "error", "name", "arguments"]);
+
+export function foldKey(key) {
+  return key.toLowerCase().replace(/\u017f/g, "s");
+}
+
+function noteFold(folds, key, value) {
+  if (key.length > 9) return folds;
+  const name = foldKey(key);
+  if (!FOLD_NAMES.has(name)) return folds;
+  const map = folds || new Map();
+  const hit = map.get(name);
+  if (hit) hit.count += 1;
+  else map.set(name, { count: 1, value });
+  return map;
+}
+
 function parseValue(ctx) {
   if (ctx.depth > MAX_DEPTH) {
     ctx.truncated = true;
@@ -159,6 +180,7 @@ function parseObject(ctx) {
     return { t: "object", map, order, dup };
   }
   let stored = 0;
+  let folds = null;
   while (ctx.i < ctx.n) {
     if (s[ctx.i] !== '"') {
       ctx.depth -= 1;
@@ -181,6 +203,7 @@ function parseObject(ctx) {
       ctx.depth -= 1;
       return fail();
     }
+    folds = noteFold(folds, keyNode.v, value);
     if (Object.prototype.hasOwnProperty.call(map, keyNode.v)) {
       dup = true;
       ctx.dups = true;
@@ -200,7 +223,7 @@ function parseObject(ctx) {
     if (s[ctx.i] === "}") {
       ctx.i += 1;
       ctx.depth -= 1;
-      return { t: "object", map, order, dup };
+      return { t: "object", map, order, dup, folds };
     }
     ctx.depth -= 1;
     return fail();
@@ -322,6 +345,8 @@ function frame(kind, raw, extra) {
 
 export function createFramer(transport) {
   let buf = Buffer.alloc(0);
+  // The first `scanned` bytes of `buf` are known to hold no line end (stdio).
+  let scanned = 0;
   const kind = transport || "stdio";
 
   function pull(end) {
@@ -331,68 +356,111 @@ export function createFramer(transport) {
     return pullStdio(end);
   }
 
-  function push(chunk) {
+  // Frames come one at a time, so a caller judges and forwards each before the
+  // next is built. Memory stays at one piece of at most MAX_FRAME bytes.
+  function* iterate(chunk) {
     const next = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    const out = [];
     let offset = 0;
     while (offset < next.length) {
       const room = MAX_FRAME - buf.length;
       if (room <= 0) {
         buf = Buffer.alloc(0);
-        out.push(frame("oversize", Buffer.alloc(0)));
+        scanned = 0;
+        yield frame("oversize", Buffer.alloc(0));
         continue;
       }
       const take = Math.min(room, next.length - offset);
       const piece = next.subarray(offset, offset + take);
       buf = buf.length === 0 ? Buffer.from(piece) : Buffer.concat([buf, piece]);
       offset += take;
-      out.push(...pull(false));
+      yield* pull(false);
       if (buf.length >= MAX_FRAME) {
         buf = Buffer.alloc(0);
-        out.push(frame("oversize", Buffer.alloc(0)));
+        scanned = 0;
+        yield frame("oversize", Buffer.alloc(0));
       }
     }
+  }
+
+  function push(chunk) {
+    const out = [];
+    for (const fr of iterate(chunk)) out.push(fr);
     return out;
   }
 
   function finish() {
-    const out = pull(true);
+    const out = [];
+    for (const fr of pull(true)) out.push(fr);
     if (buf.length > MAX_FRAME) {
       buf = Buffer.alloc(0);
+      scanned = 0;
       out.push(frame("oversize", Buffer.alloc(0)));
     }
     return out;
   }
 
-  function pullStdio(end) {
-    const out = [];
-    while (buf.length) {
-      if (startsWithContentLength(buf)) {
+  function* pullStdio(end) {
+    // `pos` walks forward through buf. buf is cut once, when the loop ends,
+    // so a long run of short lines costs one pass, not one copy per line.
+    let pos = 0;
+    let nextScanned = 0;
+    while (pos < buf.length) {
+      const rest = pos === 0 ? buf : buf.subarray(pos);
+      if (startsWithContentLength(rest)) {
+        buf = rest;
+        pos = 0;
+        scanned = 0;
         const taken = takeContentLength();
         if (taken === "need") break;
-        if (taken) out.push(taken);
+        if (taken) yield taken;
         continue;
       }
-      const nl = buf.indexOf(0x0a);
-      if (nl < 0) {
+      // A line ends at LF, at CRLF, or at a lone CR. A reader that splits on
+      // CR sees a frame after a CR as a line of its own. The raw bytes of each
+      // line keep their CR and LF as they came.
+      const eol = findLineEnd(buf, pos + (pos === 0 ? scanned : 0));
+      if (eol < 0) {
         if (end) {
-          if (buf.length) out.push(lineFrame(buf));
+          if (rest.length) yield lineFrame(rest);
           buf = Buffer.alloc(0);
+          scanned = 0;
+          return;
         }
+        nextScanned = buf.length - pos;
         break;
       }
-      const raw = buf.subarray(0, nl + 1);
-      buf = buf.subarray(nl + 1);
-      out.push(lineFrame(raw));
+      let cut = eol + 1;
+      if (buf[eol] === 0x0d) {
+        if (cut < buf.length) {
+          if (buf[cut] === 0x0a) cut += 1;
+        } else if (!end) {
+          // A CR is the last byte. A LF may follow in the next chunk, and a
+          // CRLF line must be judged whole. Hold a line that is checked; a
+          // line that is ignored anyway goes on at once.
+          const lone = lineFrame(buf.subarray(pos, cut));
+          if (lone.kind !== "ignore") {
+            nextScanned = eol - pos;
+            break;
+          }
+        }
+      }
+      const line = lineFrame(buf.subarray(pos, cut));
+      pos = cut;
+      yield line;
     }
-    return out;
+    if (pos > 0) buf = pos >= buf.length ? Buffer.alloc(0) : buf.subarray(pos);
+    scanned = nextScanned;
   }
 
   function lineFrame(raw) {
+    // A bare line end is an empty line. Most of a CR-dense stream is this.
+    if (raw.length <= 2 && (raw[0] === 0x0d || raw[0] === 0x0a) && (raw.length === 1 || raw[1] === 0x0a)) {
+      return frame("ignore", raw, { reason: "empty" });
+    }
     let text;
     const decoded = decodeUtf8(raw);
     if (!decoded.ok) return frame("invalid_utf8", raw);
-    text = decoded.text.replace(/\r?\n$/, "");
+    text = decoded.text.replace(/\r?\n$|\r$/, "");
     if (text.length === 0) return frame("ignore", raw, { reason: "empty" });
     const trimmed = text.trimStart();
     if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
@@ -495,7 +563,8 @@ export function createFramer(transport) {
     const type = headerValue(head, "content-type");
     if (type.includes("text/event-stream")) {
       const sse = createFramer("sse");
-      out.push(...sse.push(body), ...sse.finish());
+      for (const fr of sse.push(body)) out.push(fr);
+      for (const fr of sse.finish()) out.push(fr);
       return out;
     }
     const decoded = decodeUtf8(body);
@@ -520,10 +589,28 @@ export function createFramer(transport) {
   return {
     push,
     finish,
+    iterate,
     buffered() {
       return buf.length;
     },
   };
+}
+
+// Bytes looked at by findLineEnd. Tests read it to check that scanning is
+// linear in the input; nothing else does.
+export const scanStats = { bytes: 0 };
+
+// One forward scan from `from`. Returns the index of the first LF or CR, or -1.
+function findLineEnd(buffer, from) {
+  for (let i = from; i < buffer.length; i += 1) {
+    const b = buffer[i];
+    if (b === 0x0a || b === 0x0d) {
+      scanStats.bytes += i - from + 1;
+      return i;
+    }
+  }
+  scanStats.bytes += buffer.length - from;
+  return -1;
 }
 
 function startsWithContentLength(buffer) {
