@@ -975,7 +975,14 @@ globalThis.fetch = function vantioFetch(input, init) {
       log(`${c.cyan}[ ∅ VANTIO ]${c.reset} Optics status: ${humanStatus("SUCCESS")} — ${hostname} — Node ${scheme}.request`);
 
       const startedMs = Date.now();
-      const req = launchHttpHandled(launch);
+      let req;
+      try {
+        req = launchHttpHandled(launch);
+      } catch (err) {
+        // The request was never sent. Record the error, not an OK call (VAN-401).
+        try { recordHttpError(record, err, startedMs); } catch { /* ignore */ }
+        throw err;
+      }
       if (req && typeof req.on === "function") {
         try {
           if (typeof req.method === "string" && req.method) record.method = req.method;
@@ -995,20 +1002,27 @@ globalThis.fetch = function vantioFetch(input, init) {
       return req;
     }
 
-    mod.request = function (...args) {
+    // Fall back to the original only when the wrapper failed before it
+    // called it; an error from the original itself goes to the caller once.
+    function guardedLaunch(args, orig) {
+      let launched = false;
       try {
-        return wrapLaunch(args, () => origRequest(...args));
-      } catch {
-        return origRequest(...args);
+        return wrapLaunch(args, () => {
+          launched = true;
+          return orig(...args);
+        });
+      } catch (err) {
+        if (launched) throw err;
+        return orig(...args);
       }
+    }
+
+    mod.request = function (...args) {
+      return guardedLaunch(args, origRequest);
     };
     if (origGet) {
       mod.get = function (...args) {
-        try {
-          return wrapLaunch(args, () => origGet(...args));
-        } catch {
-          return origGet(...args);
-        }
+        return guardedLaunch(args, origGet);
       };
     }
     const OrigCR = mod.ClientRequest;
@@ -1017,11 +1031,7 @@ globalThis.fetch = function vantioFetch(input, init) {
         if (httpWrapOwnsConnect()) {
           return new OrigCR(...args);
         }
-        try {
-          return wrapLaunch(args, () => new OrigCR(...args));
-        } catch {
-          return new OrigCR(...args);
-        }
+        return guardedLaunch(args, (...a) => new OrigCR(...a));
       }
       Object.setPrototypeOf(VantioClientRequest, OrigCR);
       VantioClientRequest.prototype = OrigCR.prototype;
