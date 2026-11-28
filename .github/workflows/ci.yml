@@ -54,6 +54,13 @@ jobs:
       - name: Build @vantio/agent-sdk
         run: pnpm --filter @vantio/agent-sdk run build
 
+      # Repository-level tests: AGENTS.md paths, the drift workflow, the
+      # llms-full.txt copy of the manual (VAN-382), and any other file in
+      # test/. They used to run only in local `pnpm test`. The glob picks up a
+      # new root test without editing this step.
+      - name: Repository tests
+        run: node --test test/*.test.js
+
   test-python:
     name: Test Python SDK (py${{ matrix.python-version }})
     runs-on: ubuntu-latest

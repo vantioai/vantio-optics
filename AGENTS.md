@@ -14,6 +14,7 @@ Operating guide for Cursor cloud agents in this repository. Product behavior sta
 | `examples/adapters` | Adapter examples. Not listed in `pnpm-workspace.yaml`. |
 | `docs/` | Product, privacy, and publishing docs. |
 | `scripts/check_open_core_drift.py` | Comparison run by `.github/workflows/open-core-drift.yml`. |
+| `scripts/check_llms_full.mjs` | Checks that `docs/products/optics/llms-full.txt` matches the manual pages. |
 | `.github/workflows/ci.yml` | Install, lint, typecheck, test, and build. |
 | `.github/workflows/publish.yml` | `workflow_dispatch` only. Upload jobs are disabled. |
 | `.github/workflows/open-core-drift.yml` | Drift check on pull requests and pushes to `main`. |
@@ -37,6 +38,12 @@ JavaScript tests. `strace` must be on `PATH`.
 
 ```bash
 pnpm test
+```
+
+`docs/products/optics/llms-full.txt` is a copy of the manual pages, and `pnpm test` fails when it drifts. After editing a page there, rebuild it:
+
+```bash
+node scripts/check_llms_full.mjs --write
 ```
 
 Python dependencies from the CI test job, then Python tests:
